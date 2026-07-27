@@ -1,0 +1,17 @@
+[package]
+name = "complexity"
+version = "0.2.0"
+edition = "2024"
+description = "Per-function cognitive complexity and deterministic syntax signals"
+
+[dependencies]
+ignore = "=0.4.25"
+oxc = { version = "=0.141.0", features = ["ast_visit"] }
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.149"
+tree-sitter = "=0.26.11"
+tree-sitter-php = "=0.24.2"
+
+[[test]]
+name = "benchmark_generator"
+path = "benchmarks/generate_corpus.rs"

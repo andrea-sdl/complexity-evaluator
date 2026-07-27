@@ -1,0 +1,413 @@
+# `complexity` specification
+
+Version: `0.2.0`
+
+Schema: `2`
+
+Score profile: `core-v1`
+
+## Goal
+
+Give an AI and a human one deterministic CLI for JavaScript, TypeScript, and
+PHP function complexity. Preserve the existing language score rules and add
+syntax-only signals for control depth, condition shape, function span, and
+functions per file.
+
+Signals are evidence, not quality judgments. They never affect exit status.
+
+## Command
+
+```text
+complexity [--language javascript|typescript|php]...
+           [--format text|json]
+           [--max-complexity N]
+           [--stdin-filename PATH]
+           <path...|->
+```
+
+- At least one path or `-` is required.
+- `--format` defaults to `text`.
+- `--max-complexity` defaults to `15` and accepts a non-negative integer.
+- `--language` is repeatable. Omit it to select all three language families.
+- Duplicate language values are accepted once.
+- `--help` and `--version` are valid only as the sole argument.
+- Unknown options, duplicate scalar options, missing values, and unsupported
+  language or format values are usage errors.
+
+Exit codes:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Analysis completed and every function score is at or below the limit. |
+| `1` | Analysis completed and at least one function score is above the limit. |
+| `2` | Usage or discovery failed, or at least one selected input could not be read or parsed. |
+
+Exit `2` takes priority over exit `1`.
+
+## Language selection
+
+| Filter | Extensions |
+| --- | --- |
+| `javascript` | `.js`, `.jsx`, `.mjs`, `.cjs` |
+| `typescript` | `.ts`, `.tsx`, `.mts`, `.cts` |
+| `php` | `.php` |
+
+Extension matching is case-sensitive. File reports keep the source label
+`javascript`, `jsx`, `typescript`, `tsx`, or `php`.
+
+An explicit supported file excluded by the active language filters is an
+error. Directory discovery skips files outside the selected families. A run
+with no selected files is an error.
+
+## Path discovery
+
+- Paths must resolve inside the current working directory.
+- Directory scans are recursive and honor `.gitignore` and `.ignore`.
+- Global Git ignore files and `.git/info/exclude` do not affect discovery.
+- Hidden entries, `node_modules`, and `vendor` are skipped.
+- Directory symlinks are not followed.
+- Explicit supported files override ignore, hidden-entry, and
+  dependency-directory rules when their canonical target remains inside the
+  working directory.
+- Explicit directories do not override hidden or dependency-directory skips.
+- Repeated and overlapping inputs produce one result per canonical file.
+- Results sort by slash-separated canonical path relative to the current
+  working directory.
+- Unsupported explicit files and non-UTF-8 output paths are errors.
+
+## Standard input
+
+`-` reads one source from standard input.
+
+- `-` must be the sole input.
+- Exactly one `--language` value is required.
+- `--stdin-filename` is valid only with `-`.
+- The virtual filename must be a relative UTF-8 path with no `.` or `..`
+  component and an extension matching the selected language.
+- Defaults are `stdin.js`, `stdin.ts`, and `stdin.php`.
+- The virtual filename selects parser mode and supplies report paths and IDs.
+- TypeScript JSX requires a `.tsx` virtual filename.
+- PHP input follows normal file mode and requires normal PHP tags.
+- Invalid UTF-8 or a read failure produces an incomplete file report and exit
+  `2`, not a usage error.
+
+## Parse and function boundaries
+
+JavaScript and TypeScript use Oxc with the existing extension-specific source
+modes. PHP uses Tree-sitter `LANGUAGE_PHP` and retains the bounded reserved-word
+class-constant retry.
+
+The PHP retry applies only inside a class, trait, interface, or enum member
+list. It recognizes `array`, `bool`, `callable`, `false`, `float`, `int`,
+`iterable`, `mixed`, `namespace`, `null`, `object`, `string`, `true`, and
+`void`. It masks the known name in a same-length parser-only copy and accepts
+the retry only when the full second tree has no `ERROR` or `MISSING` node.
+Analysis and positions still use the original source. It never retries a
+global or function-local constant.
+
+Any parser diagnostic makes the file `parse_error`, gives it no functions or
+signals, marks the run incomplete, and causes exit `2`. A read or UTF-8 failure
+does the same with `io_error`. Valid sibling files remain in the report.
+
+Each executable function keeps its existing language-specific kind, best-effort
+name, and source range. Its stable ID is:
+
+```text
+<relative-or-virtual-path>:<start-line>:<start-column>
+```
+
+Nested callables receive separate results, are excluded from their parent, and
+start score and signal state from zero. Top-level script code is not reported.
+Positions are one-based Unicode-scalar line and column numbers.
+
+## Cognitive complexity
+
+The rules below are the `core-v1` score contract. The merge must not change any
+score, contribution, function range, threshold result, or parse-error policy.
+
+Each contribution remains:
+
+```text
+rule
+location
+base_increment
+nesting_increment
+increment
+```
+
+The function score is the sum of its ordered contribution increments. A score
+is over the limit only when `score > max_complexity`.
+
+### JavaScript and TypeScript score rules
+
+A structural contribution is `1 + current control nesting`. Its selected body
+or result then raises nesting by one.
+
+| Construct | Contribution |
+| --- | --- |
+| `if` | Structural |
+| `else if` | Flat `+1`; no new nesting level for the condition |
+| `else` | Flat `+1` |
+| `for`, `for in`, `for of`, `while`, `do while` | Structural |
+| `switch` | Structural once; cases run as nested content |
+| `catch` | Structural |
+| `try`, `finally` | `0` |
+| Ternary | Structural; both result arms are nested |
+| Labeled `break` or `continue` | Flat `+1` |
+| Unlabeled `break` or `continue` | `0` |
+| Each contiguous `&&` run | Flat `+1` |
+| `||` and `??` | `0`; each splits an `&&` run |
+| Parentheses | `0`; they do not split an `&&` run |
+| Direct homogeneous JSX logical chain | Suppressed to `0` |
+| Recursion and other constructs | `0` |
+
+A direct homogeneous JSX logical chain is the top-level logical expression in
+a JSX expression container. Suppression does not apply to mixed chains,
+non-JSX expressions, or nested unrelated expressions.
+
+Default parameter expressions belong to their callable. Class field
+initializers and static blocks belong to their containing callable. Nested
+method or function bodies remain separate. Contribution rules are `if`,
+`else_if`, `else`, `loop`, `switch`, `catch`, `ternary`, `labeled_jump`, and
+`logical_and`.
+
+### PHP score rules
+
+A structural contribution is `1 + current control nesting`. Flat
+contributions add `1` without nesting.
+
+| Construct | Contribution | Nested region |
+| --- | --- | --- |
+| `if` | Structural | Body |
+| `elseif` | Flat `+1` | Body |
+| `else` | Flat `+1` | Body |
+| Spaced `else if` | Inner `if` is flat `+1`; no separate `else` point | The `else` region and inner body both add nesting |
+| `for`, `foreach`, `while`, `do` | Structural | Body |
+| `switch` | Structural once; cases add no point | Selector, case values, and case bodies |
+| `match` | Structural once; arms add no point | Each arm result |
+| `catch` | Structural for each catch | Catch body |
+| `try`, `finally` | `0` | No added nesting |
+| Ternary, including shorthand | Structural | Present result arms |
+| `break N`, `continue N` | Flat `+1` when an argument is present | None |
+| `goto` | Flat `+1` | None |
+
+PHP score flow operators use one flattened parenthesized chain of `&&`, `||`,
+and `|>`.
+
+- When the outermost operator is `&&` or `||`, add a flat `1` for the first
+  operator and each operator-type change.
+- When the outermost operator is `|>`, add `1 + current nesting` for the first
+  operator and each later operator whose type matches the prior operator.
+- `&&` and `||` contributions use `logical_sequence`; `|>` uses `pipe`.
+- Keyword `and`, `or`, and `xor`, and null coalescing `??`, add zero to the
+  score. Their signal rules remain separate.
+
+Plain `break`, plain `continue`, `return`, `throw`, `yield`, recursion,
+nullsafe access, enums, attributes, named arguments, and Fiber API calls add
+zero by themselves. Alternative colon syntax follows the same rules as brace
+syntax.
+
+PHP contribution rules are `if`, `elseif`, `else`, `else_if`, `loop`,
+`switch`, `match`, `catch`, `ternary`, `logical_sequence`, `pipe`,
+`numbered_jump`, and `goto`.
+
+## Deterministic signals
+
+### Function span
+
+`line_span` is:
+
+```text
+range.end.line - range.start.line + 1
+```
+
+It uses the existing parser-specific function range without changing its
+meaning.
+
+### Maximum control depth
+
+`max_control_depth` counts active structural control regions:
+
+- No structural control is `0`.
+- A top-level structural region is `1`.
+- Each nested structural region adds `1`.
+- Entering a region updates the maximum even when the region has no scored
+  child.
+
+Regions follow each language scorer's executable nested regions for `if`
+branches, loops, switch or match content, catch bodies, and ternary arms.
+Tests and switch or match selectors stay at the incoming depth; the selected
+body or result enters the region. Zero-cost `try` and `finally` do not add
+depth. Nested callables reset depth.
+
+### Condition records
+
+Record the test expression for:
+
+- `if`
+- `elseif`
+- spaced `else if`
+- `while`
+- `do while`
+- a present classic `for` test
+- ternary
+
+Do not record `foreach`, `for in`, `for of`, switch selectors, match selectors,
+or free Boolean expressions.
+
+Each record has:
+
+```text
+kind
+location
+operator_count
+predicate_count
+max_boolean_depth
+```
+
+`kind` uses these stable values:
+
+| Syntax | Kind |
+| --- | --- |
+| `if` | `if` |
+| PHP `elseif` | `elseif` |
+| Spaced `else if` | `else_if` |
+| `while` | `while` |
+| `do while` | `do_while` |
+| Classic `for` test | `for` |
+| Ternary test | `ternary` |
+
+The location is the start of the test expression. Records sort by location and
+then kind.
+
+Count these operators:
+
+- JavaScript and TypeScript: `!`, `&&`, `||`, `??`
+- PHP: `!`, `&&`, `||`, `??`, `and`, `or`, `xor`
+
+Do not count comparisons, bitwise operators, PHP pipe, or ternary as Boolean
+operators in the containing condition. A nested ternary gets its own record.
+
+`operator_count` is the number of listed operator tokens.
+`predicate_count` is the number of atomic leaves after splitting on those
+operators and is at least `1`.
+
+`max_boolean_depth` is the normalized operator-tree depth:
+
+- No listed operator is `0`.
+- A flat chain of the same binary operator is `1`.
+- Mixed nested binary operators and unary `!` each add a level.
+- Parentheses, TypeScript wrappers, and parser associativity do not add depth.
+
+Examples:
+
+| Test | Operators | Predicates | Depth |
+| --- | ---: | ---: | ---: |
+| `a` | 0 | 1 | 0 |
+| `a && b && c` | 2 | 3 | 1 |
+| `a && (b || !c)` | 3 | 3 | 3 |
+
+Function signal maxima use `0` when a function has no condition records.
+
+### File signal
+
+An `ok` file reports `function_count`, including zero. A failed file reports
+`signals: null`; it must not claim that the source has zero functions.
+
+## JSON schema v2
+
+JSON is one compact object followed by one newline. Keys use this order:
+
+```text
+schema_version
+tool
+profile
+max_complexity
+status
+files
+summary
+```
+
+`tool` is `{"name":"complexity","version":"0.2.0"}`.
+
+Each file uses:
+
+```text
+path
+language
+status
+signals
+functions
+diagnostics
+```
+
+Each function uses:
+
+```text
+id
+name
+kind
+range
+score
+over_limit
+contributions
+signals
+```
+
+Function signals use:
+
+```text
+line_span
+max_control_depth
+condition_count
+max_condition_operators
+max_condition_predicates
+max_boolean_depth
+conditions
+```
+
+The summary uses:
+
+```text
+files
+functions
+violations
+errors
+max_score
+max_control_depth
+max_function_line_span
+max_functions_per_file
+conditions
+max_condition_operators
+max_condition_predicates
+max_boolean_depth
+```
+
+`violations` counts only functions above `max_complexity`. Signal maxima include
+only successfully analyzed files. Empty observed sets use zero.
+
+Arrays and diagnostics keep deterministic source ordering. JSON contains no
+source text, absolute path, host data, duration, or timestamp.
+
+## Text output
+
+Each function emits:
+
+```text
+PASS|FAIL <id> <name> score=<n> lines=<n> control-depth=<n> conditions=<n> condition-operators=<n> condition-predicates=<n> boolean-depth=<n>
+```
+
+The three condition values are per-function maxima. Full condition records are
+JSON-only. Diagnostics precede the summary.
+
+The summary reports all JSON summary values with explicit field names.
+
+## Out of scope
+
+- Signal thresholds or exit effects
+- Config files, baselines, Git diffs, SARIF, or editor services
+- Parallel analysis
+- Inheritance, import, dependency, or call graphs
+- Duplication, comment, naming, framework, or architecture judgments
+- Compatibility aliases for the old commands or JSON schema v1
+- A stable public Rust library API
