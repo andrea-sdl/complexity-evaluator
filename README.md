@@ -1,10 +1,10 @@
 # complexity
 
 `complexity` is one Rust CLI for per-function cognitive complexity in
-JavaScript, TypeScript, and PHP. It scans one file, mixed files, or directories
-and gives deterministic text or JSON reports.
+JavaScript, TypeScript, PHP, Rust, and Python. It scans one file, mixed files,
+or directories and gives deterministic text or JSON reports.
 
-Version: `0.2.0`
+Version: `0.3.0`
 
 JSON schema: `2`
 
@@ -29,7 +29,7 @@ cargo install --path .
 ## Usage
 
 ```text
-complexity [--language javascript|typescript|php]...
+complexity [--language javascript|typescript|php|rust|python]...
            [--format text|json]
            [--max-complexity N]
            [--stdin-filename PATH]
@@ -52,7 +52,7 @@ Use repeatable language filters:
 complexity --language javascript --language php .
 ```
 
-Omit `--language` to select all three language families. A directory scan skips
+Omit `--language` to select all five language families. A directory scan skips
 files outside the selected families. An explicit supported file that a filter
 excludes is an error.
 
@@ -66,7 +66,7 @@ complexity --language typescript --stdin-filename snippet.tsx -
 
 `--stdin-filename` is optional. It sets the virtual report path and parser mode.
 For example, use a `.tsx` name for TypeScript JSX. Without this option, the
-tool uses `stdin.js`, `stdin.ts`, or `stdin.php`.
+tool uses `stdin.js`, `stdin.ts`, `stdin.php`, `stdin.rs`, or `stdin.py`.
 
 ## Exit codes
 
@@ -90,7 +90,7 @@ scores or signals. Valid sibling files stay in the report.
 - [SONAR-COMPATIBILITY.md](SONAR-COMPATIBILITY.md) states the exact Sonar
   compatibility boundary.
 
-Version `0.2.0` makes no compatibility promise for the old command names, JSON
+Version `0.3.0` makes no compatibility promise for the old command names, JSON
 schema v1, or a public Rust library API.
 
 ## License

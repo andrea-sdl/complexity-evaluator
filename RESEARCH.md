@@ -91,6 +91,49 @@ Primary parser material:
 - [tree-sitter-php Rust binding](https://github.com/tree-sitter/tree-sitter-php/blob/master/bindings/rust/lib.rs)
 - [Tree-sitter](https://tree-sitter.github.io/tree-sitter/)
 
+## Rust parser
+
+Version `0.3.0` adds `tree-sitter-rust 0.24.2`. The grammar exposes
+`function_item`, `closure_expression`, control expressions, source ranges, and
+parser errors through the existing Tree-sitter API.
+
+The reviewed grammar revision was
+[`77a3747`](https://github.com/tree-sitter/tree-sitter-rust/tree/77a3747266f4d621d0757825e6b11edcbf991ca5).
+The grammar declares an MIT license and language ABI 15. Tree-sitter `0.26.11`
+accepts ABI 13 through 15. The local dependency check loaded and compiled the
+grammar with the existing runtime.
+
+Tree-sitter does not expand Rust macros. Macro token trees stay opaque, so the
+CLI cannot report generated callables or generated control flow.
+
+Primary parser material:
+
+- [tree-sitter-rust crate](https://docs.rs/crate/tree-sitter-rust/0.24.2)
+- [tree-sitter-rust node types](https://docs.rs/crate/tree-sitter-rust/0.24.2/source/src/node-types.json)
+- [Tree-sitter parser ABI list](https://github.com/tree-sitter/tree-sitter/wiki/List-of-parsers)
+
+## Python parser
+
+Version `0.3.0` adds `tree-sitter-python 0.25.0`. The grammar exposes function,
+lambda, class, control statement, expression, source range, and parser-error
+nodes through the existing Tree-sitter API.
+
+The reviewed grammar revision was
+[`26855ea`](https://github.com/tree-sitter/tree-sitter-python/tree/26855eabccb19c6abf499fbc5b8dc7cc9ab8bc64).
+The grammar declares an MIT license and language ABI 14. Its Rust crate builds
+one C scanner with the `cc` build dependency already used by the locked
+project. The local dependency check loaded and compiled it with Tree-sitter
+`0.26.11`.
+
+Version `0.3.0` accepts `.py` only. Python stub files (`.pyi`) remain outside
+the MVP.
+
+Primary parser material:
+
+- [tree-sitter-python crate](https://docs.rs/crate/tree-sitter-python/0.25.0)
+- [tree-sitter-python node types](https://docs.rs/crate/tree-sitter-python/0.25.0/source/src/node-types.json)
+- [Tree-sitter parser ABI list](https://github.com/tree-sitter/tree-sitter/wiki/List-of-parsers)
+
 ### Known parser gap
 
 The 2026-07-27 review found one gap in `tree-sitter-php 0.24.2`. PHP permits
@@ -122,6 +165,23 @@ One live PHP run measured these choices. See
 [SONAR-COMPATIBILITY.md](SONAR-COMPATIBILITY.md) and
 [COMPATIBILITY-RESULTS.md](COMPATIBILITY-RESULTS.md).
 
+The Rust rules use the SonarRust cognitive-complexity visitor at revision
+[`9539d0c`](https://github.com/SonarSource/sonar-rust/tree/9539d0c59f8965663fd3efa616a492a4c65315f3).
+That visitor scores Rust `if`, loops, `match`, labeled jumps, mixed logical
+operator sequences, and nesting. It does not score let-else or `?`.
+
+The Python rules use the SonarPython cognitive-complexity visitor at revision
+[`322e2dc`](https://github.com/SonarSource/sonar-python/tree/322e2dcb2a1bcab654614fffa394a8db43b9ef16).
+That visitor scores branches, loop and try else clauses, loops, exception
+handlers, conditional expressions, mixed `and` or `or` sequences, and nesting.
+It does not score Python `match`.
+
+Both Sonar visitors can add nested callable content to an outer function in
+some cases. `complexity` instead keeps one existing cross-language rule:
+nested callables own separate results and do not change their parent. No live
+SonarRust or SonarPython differential has run yet, so the project makes no
+measured parity percentage claim for either new language.
+
 ## Performance rule
 
 Parser language does not prove CLI speed. A valid result must include the
@@ -143,5 +203,6 @@ The v2 project license stays unset under `D-013`.
 
 - Add a live, repeatable SonarJS comparison.
 - Make the SonarPHP runner repeatable and test more independent corpora.
+- Add live, repeatable SonarRust and SonarPython comparisons.
 - Recheck parser releases before any dependency update.
 - Review the full locked dependency set and notices before release.

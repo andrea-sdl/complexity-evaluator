@@ -76,7 +76,7 @@ fn public_command_describes_the_merged_cli() {
     assert_eq!(help.status.code(), Some(0));
     assert_eq!(
         String::from_utf8(help.stdout).expect("help should be UTF-8"),
-        "Usage: complexity [--language javascript|typescript|php]... \
+        "Usage: complexity [--language javascript|typescript|php|rust|python]... \
 [--format text|json] [--max-complexity N] [--stdin-filename PATH] <path...|->\n"
     );
     assert!(help.stderr.is_empty());
@@ -85,7 +85,7 @@ fn public_command_describes_the_merged_cli() {
     assert_eq!(version.status.code(), Some(0));
     assert_eq!(
         String::from_utf8(version.stdout).expect("version should be UTF-8"),
-        "complexity 0.2.0\n"
+        "complexity 0.3.0\n"
     );
     assert!(version.stderr.is_empty());
 }
@@ -114,7 +114,7 @@ fn json_reports_one_valid_file_with_no_functions() {
     assert_eq!(
         String::from_utf8(output.stdout).expect("report should be UTF-8"),
         concat!(
-            "{\"schema_version\":2,\"tool\":{\"name\":\"complexity\",\"version\":\"0.2.0\"},",
+            "{\"schema_version\":2,\"tool\":{\"name\":\"complexity\",\"version\":\"0.3.0\"},",
             "\"profile\":\"core-v1\",\"max_complexity\":15,\"status\":\"complete\",",
             "\"files\":[{\"path\":\"src/a.js\",\"language\":\"javascript\",\"status\":\"ok\",",
             "\"signals\":{\"function_count\":0},\"functions\":[],\"diagnostics\":[]}],",
@@ -142,7 +142,7 @@ fn exact_mixed_json_includes_nonzero_signals_and_all_summary_maxima() {
     assert_eq!(
         String::from_utf8(output.stdout).expect("report should be UTF-8"),
         concat!(
-            "{\"schema_version\":2,\"tool\":{\"name\":\"complexity\",\"version\":\"0.2.0\"},",
+            "{\"schema_version\":2,\"tool\":{\"name\":\"complexity\",\"version\":\"0.3.0\"},",
             "\"profile\":\"core-v1\",\"max_complexity\":15,\"status\":\"complete\",\"files\":[",
             "{\"path\":\"a.php\",\"language\":\"php\",\"status\":\"ok\",",
             "\"signals\":{\"function_count\":0},\"functions\":[],\"diagnostics\":[]},",
@@ -226,19 +226,75 @@ fn mixed_overlapping_inputs_use_one_global_canonical_path_order() {
 }
 
 #[test]
+fn five_language_reports_are_byte_stable_and_globally_sorted() {
+    let project = TestProject::new();
+    project.write("e/function.js", "function javascript() {}\n");
+    project.write(
+        "d/function.ts",
+        "function typescript(value: number): number { return value; }\n",
+    );
+    project.write("c/function.php", "<?php\nfunction php(): void {}\n");
+    project.write("b/function.rs", "fn rust() {}\n");
+    project.write("a/function.py", "def python():\n    pass\n");
+
+    let first_json = project.run(&["--format", "json", "."]);
+    let second_json = project.run(&["--format", "json", "."]);
+    let first_text = project.run(&["--format", "text", "."]);
+    let second_text = project.run(&["--format", "text", "."]);
+
+    assert_eq!(first_json.status.code(), Some(0));
+    assert_eq!(second_json.status.code(), Some(0));
+    assert_eq!(first_text.status.code(), Some(0));
+    assert_eq!(second_text.status.code(), Some(0));
+    assert_eq!(first_json.stdout, second_json.stdout);
+    assert_eq!(first_text.stdout, second_text.stdout);
+
+    let report: serde_json::Value =
+        serde_json::from_slice(&first_json.stdout).expect("report should be valid JSON");
+    let files = report["files"]
+        .as_array()
+        .expect("files should be an array");
+    let paths_and_languages = files
+        .iter()
+        .map(|file| {
+            (
+                file["path"].as_str().expect("path should be text"),
+                file["language"].as_str().expect("language should be text"),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        paths_and_languages,
+        [
+            ("a/function.py", "python"),
+            ("b/function.rs", "rust"),
+            ("c/function.php", "php"),
+            ("d/function.ts", "typescript"),
+            ("e/function.js", "javascript"),
+        ]
+    );
+    assert_eq!(report["summary"]["functions"], 5);
+    assert_eq!(report["summary"]["errors"], 0);
+}
+
+#[test]
 fn repeated_language_filters_select_a_union_for_directory_scans() {
     let project = TestProject::new();
     project.write("src/a.js", "const javascript = true;\n");
     project.write("src/b.ts", "const typescript: boolean = true;\n");
     project.write("src/c.php", "<?php\n");
+    project.write("src/d.rs", "fn rust() {}\n");
+    project.write("src/e.py", "def python():\n    pass\n");
 
     let output = project.run(&[
         "--language",
         "php",
         "--language",
-        "javascript",
+        "rust",
         "--language",
         "php",
+        "--language",
+        "python",
         "--format",
         "json",
         "src",
@@ -247,9 +303,13 @@ fn repeated_language_filters_select_a_union_for_directory_scans() {
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stderr.is_empty());
     let stdout = String::from_utf8(output.stdout).expect("report should be UTF-8");
-    assert!(stdout.contains("\"path\":\"src/a.js\""));
+    assert!(!stdout.contains("\"path\":\"src/a.js\""));
     assert!(!stdout.contains("\"path\":\"src/b.ts\""));
     assert!(stdout.contains("\"path\":\"src/c.php\""));
+    assert!(stdout.contains("\"path\":\"src/d.rs\""));
+    assert!(stdout.contains("\"language\":\"rust\""));
+    assert!(stdout.contains("\"path\":\"src/e.py\""));
+    assert!(stdout.contains("\"language\":\"python\""));
 }
 
 #[test]
@@ -264,6 +324,18 @@ fn an_explicit_file_excluded_by_filters_is_an_error() {
     assert_eq!(
         String::from_utf8(output.stderr).expect("error should be UTF-8"),
         "error: explicit file is excluded by language filters: source.ts\n"
+    );
+}
+
+#[test]
+fn unknown_language_names_list_all_supported_filters() {
+    let output = run(&["--language", "ruby", "."]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stderr).expect("error should be UTF-8"),
+        "error: --language requires javascript, typescript, php, rust, or python\n"
     );
 }
 
@@ -336,6 +408,141 @@ fn stdin_uses_the_selected_language_default_filename() {
     let stdout = String::from_utf8(output.stdout).expect("report should be UTF-8");
     assert!(stdout.contains("\"path\":\"stdin.ts\""));
     assert!(stdout.contains("\"language\":\"typescript\""));
+}
+
+#[test]
+fn stdin_dispatches_rust_and_python_with_default_filenames() {
+    let project = TestProject::new();
+
+    let rust = project.run_with_stdin(
+        &["--language", "rust", "--format", "json", "-"],
+        b"fn rust_stdin() {}\n",
+    );
+    assert_eq!(rust.status.code(), Some(0));
+    assert!(rust.stderr.is_empty());
+    let rust: serde_json::Value =
+        serde_json::from_slice(&rust.stdout).expect("Rust report should be JSON");
+    assert_eq!(rust["files"][0]["path"], "stdin.rs");
+    assert_eq!(rust["files"][0]["language"], "rust");
+    assert_eq!(rust["files"][0]["functions"][0]["id"], "stdin.rs:1:1");
+
+    let python = project.run_with_stdin(
+        &["--language", "python", "--format", "json", "-"],
+        b"def python_stdin():\n    pass\n",
+    );
+    assert_eq!(python.status.code(), Some(0));
+    assert!(python.stderr.is_empty());
+    let python: serde_json::Value =
+        serde_json::from_slice(&python.stdout).expect("Python report should be JSON");
+    assert_eq!(python["files"][0]["path"], "stdin.py");
+    assert_eq!(python["files"][0]["language"], "python");
+    assert_eq!(python["files"][0]["functions"][0]["id"], "stdin.py:1:1");
+}
+
+#[test]
+fn rust_engine_analyzes_this_cli_source_deterministically() {
+    let first = run(&[
+        "--language",
+        "rust",
+        "--format",
+        "json",
+        "--max-complexity",
+        "4294967295",
+        "src",
+    ]);
+    let second = run(&[
+        "--language",
+        "rust",
+        "--format",
+        "json",
+        "--max-complexity",
+        "4294967295",
+        "src",
+    ]);
+
+    assert_eq!(first.status.code(), Some(0));
+    assert_eq!(second.status.code(), Some(0));
+    assert!(first.stderr.is_empty());
+    assert!(second.stderr.is_empty());
+    assert_eq!(first.stdout, second.stdout);
+
+    let report: serde_json::Value =
+        serde_json::from_slice(&first.stdout).expect("self-analysis should return JSON");
+    assert_eq!(report["status"], "complete");
+    assert_eq!(report["summary"]["errors"], 0);
+    assert!(
+        report["summary"]["functions"]
+            .as_u64()
+            .expect("function count should be numeric")
+            > 0
+    );
+
+    let files = report["files"]
+        .as_array()
+        .expect("files should be an array");
+    assert!(
+        files
+            .iter()
+            .all(|file| file["language"].as_str() == Some("rust"))
+    );
+    assert!(files.iter().any(|file| file["path"] == "src/lib.rs"));
+    assert!(files.iter().any(|file| file["path"] == "src/main.rs"));
+}
+
+#[test]
+fn cli_source_cannot_regress_above_score_seven() {
+    let output = run(&[
+        "--language",
+        "rust",
+        "--format",
+        "json",
+        "--max-complexity",
+        "7",
+        "src",
+    ]);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("self-analysis should return JSON");
+    assert_eq!(report["status"], "complete");
+    assert_eq!(report["summary"]["errors"], 0);
+    assert_eq!(report["summary"]["violations"], 0);
+    assert_eq!(report["summary"]["files"], 7);
+    assert_eq!(report["summary"]["functions"], 407);
+    assert!(
+        report["summary"]["max_score"]
+            .as_u64()
+            .expect("maximum score should be numeric")
+            <= 7
+    );
+
+    let analyzed_source = report["files"]
+        .as_array()
+        .expect("files should be an array")
+        .iter()
+        .map(|file| {
+            (
+                file["path"].as_str().expect("path should be text"),
+                file["signals"]["function_count"]
+                    .as_u64()
+                    .expect("function count should be numeric"),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        analyzed_source,
+        [
+            ("src/javascript.rs", 107),
+            ("src/lib.rs", 68),
+            ("src/main.rs", 1),
+            ("src/model.rs", 1),
+            ("src/php.rs", 89),
+            ("src/python.rs", 75),
+            ("src/rust.rs", 66),
+        ]
+    );
 }
 
 #[test]

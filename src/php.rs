@@ -6,28 +6,10 @@ use crate::model::{
 };
 
 pub(crate) fn analyze_source(path: &str, source: &str, max_complexity: u32) -> FileResult {
-    let mut parser = Parser::new();
-    let language = tree_sitter_php::LANGUAGE_PHP.into();
-    if let Err(error) = parser.set_language(&language) {
-        return failed_file(
-            path,
-            format!("cannot load PHP grammar: {error}"),
-            Position { line: 1, column: 1 },
-        );
-    }
-
-    let Some(mut tree) = parser.parse(source, None) else {
-        return failed_file(
-            path,
-            "parser returned no syntax tree".to_string(),
-            Position { line: 1, column: 1 },
-        );
+    let tree = match parse_php_tree(source) {
+        Ok(tree) => tree,
+        Err(message) => return failed_file(path, message, Position { line: 1, column: 1 }),
     };
-
-    if let Some(reparsed_tree) = reparse_reserved_class_constants(&mut parser, &tree, source) {
-        tree = reparsed_tree;
-    }
-
     let root = tree.root_node();
     let positions = LineIndex::new(source);
     if root.has_error() {
@@ -48,24 +30,7 @@ pub(crate) fn analyze_source(path: &str, source: &str, max_complexity: u32) -> F
         max_complexity,
         &mut functions,
     );
-    functions.sort_by(|left, right| {
-        (
-            left.range.start.line,
-            left.range.start.column,
-            left.range.end.line,
-            left.range.end.column,
-            &left.kind,
-            &left.id,
-        )
-            .cmp(&(
-                right.range.start.line,
-                right.range.start.column,
-                right.range.end.line,
-                right.range.end.column,
-                &right.kind,
-                &right.id,
-            ))
-    });
+    functions.sort_by(function_order);
 
     let function_count = functions.len();
     FileResult {
@@ -78,6 +43,41 @@ pub(crate) fn analyze_source(path: &str, source: &str, max_complexity: u32) -> F
     }
 }
 
+fn parse_php_tree(source: &str) -> Result<Tree, String> {
+    let mut parser = Parser::new();
+    let language = tree_sitter_php::LANGUAGE_PHP.into();
+    parser
+        .set_language(&language)
+        .map_err(|error| format!("cannot load PHP grammar: {error}"))?;
+
+    let mut tree = parser
+        .parse(source, None)
+        .ok_or_else(|| "parser returned no syntax tree".to_string())?;
+    if let Some(reparsed_tree) = reparse_reserved_class_constants(&mut parser, &tree, source) {
+        tree = reparsed_tree;
+    }
+    Ok(tree)
+}
+
+fn function_order(left: &FunctionResult, right: &FunctionResult) -> std::cmp::Ordering {
+    (
+        left.range.start.line,
+        left.range.start.column,
+        left.range.end.line,
+        left.range.end.column,
+        &left.kind,
+        &left.id,
+    )
+        .cmp(&(
+            right.range.start.line,
+            right.range.start.column,
+            right.range.end.line,
+            right.range.end.column,
+            &right.kind,
+            &right.id,
+        ))
+}
+
 fn collect_functions(
     node: Node<'_>,
     source: &str,
@@ -86,76 +86,95 @@ fn collect_functions(
     max_complexity: u32,
     functions: &mut Vec<FunctionResult>,
 ) {
-    if let Some(kind) = function_kind(node)
-        && let Some(body) = node.child_by_field_name("body")
-    {
-        let start = positions.position(node.start_byte());
-        let end = positions.position(node.end_byte());
-        let name = node
-            .child_by_field_name("name")
-            .and_then(|name| name.utf8_text(source.as_bytes()).ok())
-            .unwrap_or("<anonymous>")
-            .to_string();
-        let mut contributions = Vec::new();
-        score_node(body, 0, positions, &mut contributions);
-        contributions.sort_by(|left, right| {
-            (
-                left.location.line,
-                left.location.column,
-                &left.rule,
-                left.increment,
-            )
-                .cmp(&(
-                    right.location.line,
-                    right.location.column,
-                    &right.rule,
-                    right.increment,
-                ))
-        });
-        let score = contributions
-            .iter()
-            .map(|contribution| contribution.increment)
-            .sum();
-        let mut signals = FunctionSignals::empty();
-        signals.line_span = end.line - start.line + 1;
-        signals.max_control_depth = max_control_depth(body);
-        signals.conditions = condition_records(body, positions);
-        signals.condition_count = signals.conditions.len();
-        signals.max_condition_operators = signals
-            .conditions
-            .iter()
-            .map(|condition| condition.operator_count)
-            .max()
-            .unwrap_or(0);
-        signals.max_condition_predicates = signals
-            .conditions
-            .iter()
-            .map(|condition| condition.predicate_count)
-            .max()
-            .unwrap_or(0);
-        signals.max_boolean_depth = signals
-            .conditions
-            .iter()
-            .map(|condition| condition.max_boolean_depth)
-            .max()
-            .unwrap_or(0);
-
-        functions.push(FunctionResult {
-            id: format!("{path}:{}:{}", start.line, start.column),
-            name,
-            kind: kind.to_string(),
-            range: SourceRange { start, end },
-            score,
-            over_limit: score > max_complexity,
-            contributions,
-            signals,
-        });
+    if let Some(function) = analyze_function(node, source, positions, path, max_complexity) {
+        functions.push(function);
     }
 
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
         collect_functions(child, source, positions, path, max_complexity, functions);
     }
+}
+
+fn analyze_function(
+    node: Node<'_>,
+    source: &str,
+    positions: &LineIndex<'_>,
+    path: &str,
+    max_complexity: u32,
+) -> Option<FunctionResult> {
+    let kind = function_kind(node)?;
+    let body = node.child_by_field_name("body")?;
+    let start = positions.position(node.start_byte());
+    let end = positions.position(node.end_byte());
+    let name = node
+        .child_by_field_name("name")
+        .and_then(|name| name.utf8_text(source.as_bytes()).ok())
+        .unwrap_or("<anonymous>")
+        .to_string();
+    let (score, contributions) = score_function_body(body, positions);
+
+    Some(FunctionResult {
+        id: format!("{path}:{}:{}", start.line, start.column),
+        name,
+        kind: kind.to_string(),
+        range: SourceRange { start, end },
+        score,
+        over_limit: score > max_complexity,
+        contributions,
+        signals: function_signals(body, start, end, positions),
+    })
+}
+
+fn score_function_body(body: Node<'_>, positions: &LineIndex<'_>) -> (u32, Vec<Contribution>) {
+    let mut contributions = Vec::new();
+    score_node(body, 0, positions, &mut contributions);
+    contributions.sort_by(|left, right| {
+        (
+            left.location.line,
+            left.location.column,
+            &left.rule,
+            left.increment,
+        )
+            .cmp(&(
+                right.location.line,
+                right.location.column,
+                &right.rule,
+                right.increment,
+            ))
+    });
+    let score = contributions.iter().map(|item| item.increment).sum();
+    (score, contributions)
+}
+
+fn function_signals(
+    body: Node<'_>,
+    start: Position,
+    end: Position,
+    positions: &LineIndex<'_>,
+) -> FunctionSignals {
+    let conditions = condition_records(body, positions);
+    let mut signals = FunctionSignals::empty();
+    signals.line_span = end.line - start.line + 1;
+    signals.max_control_depth = max_control_depth(body);
+    signals.condition_count = conditions.len();
+    signals.max_condition_operators = conditions
+        .iter()
+        .map(|condition| condition.operator_count)
+        .max()
+        .unwrap_or(0);
+    signals.max_condition_predicates = conditions
+        .iter()
+        .map(|condition| condition.predicate_count)
+        .max()
+        .unwrap_or(0);
+    signals.max_boolean_depth = conditions
+        .iter()
+        .map(|condition| condition.max_boolean_depth)
+        .max()
+        .unwrap_or(0);
+    signals.conditions = conditions;
+    signals
 }
 
 fn condition_records(body: Node<'_>, positions: &LineIndex<'_>) -> Vec<ConditionRecord> {
@@ -189,6 +208,7 @@ fn collect_condition_records(
         "while_statement" => Some(("while", true)),
         "do_statement" => Some(("do_while", true)),
         "for_statement" => Some(("for", false)),
+        "conditional_expression" => Some(("ternary", false)),
         _ => None,
     };
     if let Some((kind, strip_required_parentheses)) = condition_kind
@@ -203,12 +223,6 @@ fn collect_condition_records(
         );
     }
 
-    if node.kind() == "conditional_expression"
-        && let Some(condition) = node.child_by_field_name("condition")
-    {
-        add_condition_record("ternary", condition, false, positions, records);
-    }
-
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
         collect_condition_records(child, positions, records);
@@ -221,36 +235,64 @@ fn collect_if_condition_records(
     positions: &LineIndex<'_>,
     records: &mut Vec<ConditionRecord>,
 ) {
-    if let Some(condition) = node.child_by_field_name("condition") {
-        add_condition_record(kind, condition, true, positions, records);
-        collect_condition_records(condition, positions, records);
-    }
-    if let Some(body) = node.child_by_field_name("body") {
-        collect_condition_records(body, positions, records);
-    }
+    collect_condition_field(node, kind, true, positions, records);
+    collect_body_conditions(node, positions, records);
 
     let mut alternatives = node.walk();
     for alternative in node.children_by_field_name("alternative", &mut alternatives) {
         if alternative.kind() == "else_if_clause" {
-            if let Some(condition) = alternative.child_by_field_name("condition") {
-                add_condition_record("elseif", condition, true, positions, records);
-                collect_condition_records(condition, positions, records);
-            }
-            if let Some(body) = alternative.child_by_field_name("body") {
-                collect_condition_records(body, positions, records);
-            }
+            collect_condition_field(alternative, "elseif", true, positions, records);
+            collect_body_conditions(alternative, positions, records);
             continue;
         }
 
-        let Some(body) = alternative.child_by_field_name("body") else {
-            continue;
-        };
-        if body.kind() == "if_statement" {
-            collect_if_condition_records(body, "else_if", positions, records);
-        } else {
-            collect_condition_records(body, positions, records);
-        }
+        collect_else_condition_records(alternative, positions, records);
     }
+}
+
+fn collect_condition_field(
+    node: Node<'_>,
+    kind: &str,
+    strip_required_parentheses: bool,
+    positions: &LineIndex<'_>,
+    records: &mut Vec<ConditionRecord>,
+) {
+    let Some(condition) = node.child_by_field_name("condition") else {
+        return;
+    };
+    add_condition_record(
+        kind,
+        condition,
+        strip_required_parentheses,
+        positions,
+        records,
+    );
+    collect_condition_records(condition, positions, records);
+}
+
+fn collect_body_conditions(
+    node: Node<'_>,
+    positions: &LineIndex<'_>,
+    records: &mut Vec<ConditionRecord>,
+) {
+    if let Some(body) = node.child_by_field_name("body") {
+        collect_condition_records(body, positions, records);
+    }
+}
+
+fn collect_else_condition_records(
+    alternative: Node<'_>,
+    positions: &LineIndex<'_>,
+    records: &mut Vec<ConditionRecord>,
+) {
+    let Some(body) = alternative.child_by_field_name("body") else {
+        return;
+    };
+    if body.kind() == "if_statement" {
+        collect_if_condition_records(body, "else_if", positions, records);
+        return;
+    }
+    collect_condition_records(body, positions, records);
 }
 
 fn add_condition_record(
@@ -276,7 +318,7 @@ fn add_condition_record(
 }
 
 fn count_boolean_operators(node: Node<'_>) -> (usize, usize) {
-    if function_kind(node).is_some() || node.kind() == "conditional_expression" {
+    if is_boolean_boundary(node) {
         return (0, 0);
     }
 
@@ -294,16 +336,12 @@ fn count_boolean_operators(node: Node<'_>) -> (usize, usize) {
 }
 
 fn boolean_depth(node: Node<'_>, parent_operator: Option<&str>) -> usize {
-    if function_kind(node).is_some() {
+    if is_boolean_boundary(node) {
         return 0;
     }
     if let Some(expression) = parenthesized_inner_expression(node) {
         return boolean_depth(expression, parent_operator);
     }
-    if node.kind() == "conditional_expression" {
-        return 0;
-    }
-
     if let Some(argument) = boolean_not_argument(node) {
         return 1 + boolean_depth(argument, None);
     }
@@ -325,6 +363,10 @@ fn boolean_depth(node: Node<'_>, parent_operator: Option<&str>) -> usize {
         maximum = maximum.max(boolean_depth(child, None));
     }
     maximum
+}
+
+fn is_boolean_boundary(node: Node<'_>) -> bool {
+    function_kind(node).is_some() || node.kind() == "conditional_expression"
 }
 
 fn boolean_binary_operator(node: Node<'_>) -> Option<&str> {
@@ -360,94 +402,16 @@ fn collect_control_depth(node: Node<'_>, active_depth: usize, maximum: &mut usiz
     }
 
     match node.kind() {
-        "if_statement" => {
-            collect_if_control_depth(node, active_depth, maximum);
-            return;
-        }
+        "if_statement" => return collect_if_control_depth(node, active_depth, maximum),
         "for_statement" | "foreach_statement" | "while_statement" | "do_statement" => {
-            let region_depth = active_depth + 1;
-            *maximum = (*maximum).max(region_depth);
-            let mut body_cursor = node.walk();
-            let body_ids = node
-                .children_by_field_name("body", &mut body_cursor)
-                .map(|body| body.id())
-                .collect::<Vec<_>>();
-            let mut cursor = node.walk();
-            for child in node.named_children(&mut cursor) {
-                let child_depth = if body_ids.contains(&child.id()) {
-                    region_depth
-                } else {
-                    active_depth
-                };
-                collect_control_depth(child, child_depth, maximum);
-            }
-            return;
+            return collect_body_control_depth(node, active_depth, maximum);
         }
-        "switch_statement" => {
-            let region_depth = active_depth + 1;
-            *maximum = (*maximum).max(region_depth);
-            if let Some(condition) = node.child_by_field_name("condition") {
-                collect_control_depth(condition, active_depth, maximum);
-            }
-            if let Some(body) = node.child_by_field_name("body") {
-                collect_control_depth(body, region_depth, maximum);
-            }
-            return;
-        }
-        "catch_clause" => {
-            let region_depth = active_depth + 1;
-            *maximum = (*maximum).max(region_depth);
-            let body_id = node.child_by_field_name("body").map(|body| body.id());
-            let mut cursor = node.walk();
-            for child in node.named_children(&mut cursor) {
-                let child_depth = if Some(child.id()) == body_id {
-                    region_depth
-                } else {
-                    active_depth
-                };
-                collect_control_depth(child, child_depth, maximum);
-            }
-            return;
-        }
+        "switch_statement" => return collect_switch_control_depth(node, active_depth, maximum),
+        "catch_clause" => return collect_body_control_depth(node, active_depth, maximum),
         "conditional_expression" => {
-            let region_depth = active_depth + 1;
-            *maximum = (*maximum).max(region_depth);
-            if let Some(condition) = node.child_by_field_name("condition") {
-                collect_control_depth(condition, active_depth, maximum);
-            }
-            if let Some(body) = node.child_by_field_name("body") {
-                collect_control_depth(body, region_depth, maximum);
-            }
-            if let Some(alternative) = node.child_by_field_name("alternative") {
-                collect_control_depth(alternative, region_depth, maximum);
-            }
-            return;
+            return collect_ternary_control_depth(node, active_depth, maximum);
         }
-        "match_expression" => {
-            let region_depth = active_depth + 1;
-            *maximum = (*maximum).max(region_depth);
-            if let Some(condition) = node.child_by_field_name("condition") {
-                collect_control_depth(condition, active_depth, maximum);
-            }
-            if let Some(body) = node.child_by_field_name("body") {
-                let mut branch_cursor = body.walk();
-                for branch in body.named_children(&mut branch_cursor) {
-                    let result_id = branch
-                        .child_by_field_name("return_expression")
-                        .map(|result| result.id());
-                    let mut child_cursor = branch.walk();
-                    for child in branch.named_children(&mut child_cursor) {
-                        let child_depth = if Some(child.id()) == result_id {
-                            region_depth
-                        } else {
-                            active_depth
-                        };
-                        collect_control_depth(child, child_depth, maximum);
-                    }
-                }
-            }
-            return;
-        }
+        "match_expression" => return collect_match_control_depth(node, active_depth, maximum),
         _ => {}
     }
 
@@ -457,33 +421,101 @@ fn collect_control_depth(node: Node<'_>, active_depth: usize, maximum: &mut usiz
     }
 }
 
+fn collect_body_control_depth(node: Node<'_>, active_depth: usize, maximum: &mut usize) {
+    let region_depth = active_depth + 1;
+    *maximum = (*maximum).max(region_depth);
+    let mut bodies = node.walk();
+    let body_ids = node
+        .children_by_field_name("body", &mut bodies)
+        .map(|body| body.id())
+        .collect::<Vec<_>>();
+    let mut children = node.walk();
+    for child in node.named_children(&mut children) {
+        let child_depth = if body_ids.contains(&child.id()) {
+            region_depth
+        } else {
+            active_depth
+        };
+        collect_control_depth(child, child_depth, maximum);
+    }
+}
+
+fn collect_switch_control_depth(node: Node<'_>, active_depth: usize, maximum: &mut usize) {
+    let region_depth = active_depth + 1;
+    *maximum = (*maximum).max(region_depth);
+    collect_control_field(node, "condition", active_depth, maximum);
+    collect_control_field(node, "body", region_depth, maximum);
+}
+
+fn collect_ternary_control_depth(node: Node<'_>, active_depth: usize, maximum: &mut usize) {
+    let region_depth = active_depth + 1;
+    *maximum = (*maximum).max(region_depth);
+    collect_control_field(node, "condition", active_depth, maximum);
+    collect_control_field(node, "body", region_depth, maximum);
+    collect_control_field(node, "alternative", region_depth, maximum);
+}
+
+fn collect_control_field(node: Node<'_>, field: &str, active_depth: usize, maximum: &mut usize) {
+    if let Some(child) = node.child_by_field_name(field) {
+        collect_control_depth(child, active_depth, maximum);
+    }
+}
+
+fn collect_match_control_depth(node: Node<'_>, active_depth: usize, maximum: &mut usize) {
+    let region_depth = active_depth + 1;
+    *maximum = (*maximum).max(region_depth);
+    collect_control_field(node, "condition", active_depth, maximum);
+    let Some(body) = node.child_by_field_name("body") else {
+        return;
+    };
+    let mut branches = body.walk();
+    for branch in body.named_children(&mut branches) {
+        collect_match_branch_control_depth(branch, active_depth, region_depth, maximum);
+    }
+}
+
+fn collect_match_branch_control_depth(
+    branch: Node<'_>,
+    active_depth: usize,
+    region_depth: usize,
+    maximum: &mut usize,
+) {
+    let result_id = branch
+        .child_by_field_name("return_expression")
+        .map(|result| result.id());
+    let mut children = branch.walk();
+    for child in branch.named_children(&mut children) {
+        let child_depth = if Some(child.id()) == result_id {
+            region_depth
+        } else {
+            active_depth
+        };
+        collect_control_depth(child, child_depth, maximum);
+    }
+}
+
 fn collect_if_control_depth(node: Node<'_>, active_depth: usize, maximum: &mut usize) {
     let region_depth = active_depth + 1;
     *maximum = (*maximum).max(region_depth);
-
-    if let Some(condition) = node.child_by_field_name("condition") {
-        collect_control_depth(condition, active_depth, maximum);
-    }
-    if let Some(body) = node.child_by_field_name("body") {
-        collect_control_depth(body, region_depth, maximum);
-    }
+    collect_control_field(node, "condition", active_depth, maximum);
+    collect_control_field(node, "body", region_depth, maximum);
 
     let mut alternatives = node.walk();
     for alternative in node.children_by_field_name("alternative", &mut alternatives) {
-        if alternative.kind() == "else_if_clause" {
-            if let Some(condition) = alternative.child_by_field_name("condition") {
-                collect_control_depth(condition, active_depth, maximum);
-            }
-            if let Some(body) = alternative.child_by_field_name("body") {
-                collect_control_depth(body, region_depth, maximum);
-            }
-            continue;
-        }
-
-        if let Some(body) = alternative.child_by_field_name("body") {
-            collect_control_depth(body, region_depth, maximum);
-        }
+        collect_if_alternative_control_depth(alternative, active_depth, region_depth, maximum);
     }
+}
+
+fn collect_if_alternative_control_depth(
+    alternative: Node<'_>,
+    active_depth: usize,
+    region_depth: usize,
+    maximum: &mut usize,
+) {
+    if alternative.kind() == "else_if_clause" {
+        collect_control_field(alternative, "condition", active_depth, maximum);
+    }
+    collect_control_field(alternative, "body", region_depth, maximum);
 }
 
 fn score_node(
@@ -496,40 +528,8 @@ fn score_node(
         return;
     }
 
-    match node.kind() {
-        "if_statement" => {
-            score_if(node, nesting, false, positions, contributions);
-            return;
-        }
-        "for_statement" | "foreach_statement" | "while_statement" | "do_statement" => {
-            score_loop(node, nesting, positions, contributions);
-            return;
-        }
-        "switch_statement" => {
-            score_switch(node, nesting, positions, contributions);
-            return;
-        }
-        "catch_clause" => {
-            score_catch(node, nesting, positions, contributions);
-            return;
-        }
-        "conditional_expression" => {
-            score_ternary(node, nesting, positions, contributions);
-            return;
-        }
-        "match_expression" => {
-            score_match(node, nesting, positions, contributions);
-            return;
-        }
-        "break_statement" | "continue_statement" => {
-            score_numbered_jump(node, nesting, positions, contributions);
-            return;
-        }
-        "goto_statement" => {
-            add_flat_contribution("goto", node, positions, contributions);
-            return;
-        }
-        _ => {}
+    if score_control_node(node, nesting, positions, contributions) {
+        return;
     }
 
     if node.kind() == "binary_expression" && flow_operator(node).is_some() {
@@ -537,6 +537,51 @@ fn score_node(
         return;
     }
 
+    score_children(node, nesting, positions, contributions);
+}
+
+fn score_control_node(
+    node: Node<'_>,
+    nesting: u32,
+    positions: &LineIndex<'_>,
+    contributions: &mut Vec<Contribution>,
+) -> bool {
+    match node.kind() {
+        "if_statement" => {
+            score_if(node, nesting, false, positions, contributions);
+        }
+        "for_statement" | "foreach_statement" | "while_statement" | "do_statement" => {
+            score_loop(node, nesting, positions, contributions);
+        }
+        "switch_statement" => {
+            score_switch(node, nesting, positions, contributions);
+        }
+        "catch_clause" => {
+            score_catch(node, nesting, positions, contributions);
+        }
+        "conditional_expression" => {
+            score_ternary(node, nesting, positions, contributions);
+        }
+        "match_expression" => {
+            score_match(node, nesting, positions, contributions);
+        }
+        "break_statement" | "continue_statement" => {
+            score_numbered_jump(node, nesting, positions, contributions);
+        }
+        "goto_statement" => {
+            add_flat_contribution("goto", node, positions, contributions);
+        }
+        _ => return false,
+    }
+    true
+}
+
+fn score_children(
+    node: Node<'_>,
+    nesting: u32,
+    positions: &LineIndex<'_>,
+    contributions: &mut Vec<Contribution>,
+) {
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
         score_node(child, nesting, positions, contributions);
@@ -559,18 +604,14 @@ fn score_match(
 
     let mut branch_cursor = body.walk();
     for branch in body.named_children(&mut branch_cursor) {
-        let result_id = branch
-            .child_by_field_name("return_expression")
-            .map(|result| result.id());
-        let mut child_cursor = branch.walk();
-        for child in branch.named_children(&mut child_cursor) {
-            let child_nesting = if Some(child.id()) == result_id {
-                nesting + 1
-            } else {
-                nesting
-            };
-            score_node(child, child_nesting, positions, contributions);
+        if let Some(condition) = branch.child_by_field_name("conditional_expressions") {
+            score_node(condition, nesting, positions, contributions);
         }
+
+        let result = branch
+            .child_by_field_name("return_expression")
+            .expect("match arm must return an expression");
+        score_node(result, nesting + 1, positions, contributions);
     }
 }
 
@@ -620,28 +661,42 @@ fn score_flow_sequence(
     let mut operators = Vec::new();
     collect_flow_operators(node, &mut operators);
 
-    match root_operator {
-        FlowOperator::And | FlowOperator::Or => {
-            let mut previous = None;
-            for (operator, point) in &operators {
-                if previous != Some(*operator) {
-                    add_flat_contribution(operator.rule(), *point, positions, contributions);
-                }
-                previous = Some(*operator);
-            }
-        }
-        FlowOperator::Pipe => {
-            let mut previous = None;
-            for (index, (operator, point)) in operators.iter().enumerate() {
-                if index == 0 || previous == Some(*operator) {
-                    add_contribution(operator.rule(), *point, nesting, positions, contributions);
-                }
-                previous = Some(*operator);
-            }
-        }
+    if root_operator == FlowOperator::Pipe {
+        score_pipe_operators(&operators, nesting, positions, contributions);
+    } else {
+        score_logical_operators(&operators, positions, contributions);
     }
 
     score_flow_operands(node, nesting, positions, contributions);
+}
+
+fn score_logical_operators(
+    operators: &[(FlowOperator, Node<'_>)],
+    positions: &LineIndex<'_>,
+    contributions: &mut Vec<Contribution>,
+) {
+    let mut previous = None;
+    for (operator, point) in operators {
+        if previous != Some(*operator) {
+            add_flat_contribution(operator.rule(), *point, positions, contributions);
+        }
+        previous = Some(*operator);
+    }
+}
+
+fn score_pipe_operators(
+    operators: &[(FlowOperator, Node<'_>)],
+    nesting: u32,
+    positions: &LineIndex<'_>,
+    contributions: &mut Vec<Contribution>,
+) {
+    let mut previous = None;
+    for (index, (operator, point)) in operators.iter().enumerate() {
+        if index == 0 || previous == Some(*operator) {
+            add_contribution(operator.rule(), *point, nesting, positions, contributions);
+        }
+        previous = Some(*operator);
+    }
 }
 
 fn collect_flow_operators<'tree>(
@@ -851,12 +906,14 @@ fn score_if_alternative(
 ) {
     if alternative.kind() == "else_if_clause" {
         add_flat_contribution("elseif", alternative, positions, contributions);
-        if let Some(condition) = alternative.child_by_field_name("condition") {
-            score_node(condition, nesting, positions, contributions);
-        }
-        if let Some(body) = alternative.child_by_field_name("body") {
-            score_node(body, nesting + 1, positions, contributions);
-        }
+        let Some(condition) = alternative.child_by_field_name("condition") else {
+            return;
+        };
+        let Some(body) = alternative.child_by_field_name("body") else {
+            return;
+        };
+        score_node(condition, nesting, positions, contributions);
+        score_node(body, nesting + 1, positions, contributions);
         return;
     }
 
@@ -1000,6 +1057,113 @@ fn is_at_class_member_scope(mut node: Node<'_>) -> bool {
 }
 
 fn reserved_class_constant_name_start(node: Node<'_>, source: &[u8]) -> Option<usize> {
+    let mut comment_ranges = Vec::new();
+    collect_comment_ranges(node, &mut comment_ranges);
+    comment_ranges.sort_unstable();
+    let mut next_comment = 0;
+    let mut index = node.start_byte();
+    let mut scan = ClassConstantScan::default();
+
+    while index < node.end_byte() {
+        index = skip_comment(index, &comment_ranges, &mut next_comment);
+        if index >= node.end_byte() {
+            break;
+        }
+
+        let token = scan_class_constant_byte(&mut scan, source, index, node.end_byte());
+        index = token.next_index;
+        match token.result {
+            ClassConstantScanResult::Continue => {}
+            ClassConstantScanResult::Found(start) => return Some(start),
+            ClassConstantScanResult::Stop => return None,
+        }
+    }
+
+    None
+}
+
+#[derive(Default)]
+struct ClassConstantScan {
+    saw_const: bool,
+    candidate: Option<(usize, usize)>,
+}
+
+enum ClassConstantScanResult {
+    Continue,
+    Found(usize),
+    Stop,
+}
+
+struct ClassConstantByte {
+    next_index: usize,
+    result: ClassConstantScanResult,
+}
+
+fn scan_class_constant_byte(
+    scan: &mut ClassConstantScan,
+    source: &[u8],
+    index: usize,
+    end: usize,
+) -> ClassConstantByte {
+    match source[index] {
+        b'=' => class_constant_assignment(scan, source, index),
+        b';' | b'{' | b'}' if scan.saw_const => ClassConstantByte {
+            next_index: index,
+            result: ClassConstantScanResult::Stop,
+        },
+        byte if starts_php_identifier(byte) => {
+            let identifier_end = php_identifier_end(source, index + 1, end);
+            let identifier = &source[index..identifier_end];
+            if identifier.eq_ignore_ascii_case(b"const") {
+                scan.saw_const = true;
+                scan.candidate = None;
+            } else if scan.saw_const {
+                scan.candidate = Some((index, identifier_end));
+            }
+            ClassConstantByte {
+                next_index: identifier_end,
+                result: ClassConstantScanResult::Continue,
+            }
+        }
+        _ => ClassConstantByte {
+            next_index: index + 1,
+            result: ClassConstantScanResult::Continue,
+        },
+    }
+}
+
+fn class_constant_assignment(
+    scan: &ClassConstantScan,
+    source: &[u8],
+    index: usize,
+) -> ClassConstantByte {
+    let Some((start, end)) = scan.candidate else {
+        return ClassConstantByte {
+            next_index: index,
+            result: ClassConstantScanResult::Stop,
+        };
+    };
+    let result = if scan.saw_const && is_reserved_class_constant_name(&source[start..end]) {
+        ClassConstantScanResult::Found(start)
+    } else {
+        ClassConstantScanResult::Stop
+    };
+    ClassConstantByte {
+        next_index: index,
+        result,
+    }
+}
+
+fn skip_comment(index: usize, ranges: &[(usize, usize)], next_comment: &mut usize) -> usize {
+    if *next_comment < ranges.len() && index == ranges[*next_comment].0 {
+        let end = ranges[*next_comment].1;
+        *next_comment += 1;
+        return end;
+    }
+    index
+}
+
+fn is_reserved_class_constant_name(name: &[u8]) -> bool {
     const RESERVED_NAMES: &[&[u8]] = &[
         b"array",
         b"bool",
@@ -1016,62 +1180,20 @@ fn reserved_class_constant_name_start(node: Node<'_>, source: &[u8]) -> Option<u
         b"true",
         b"void",
     ];
+    RESERVED_NAMES
+        .iter()
+        .any(|reserved| name.eq_ignore_ascii_case(reserved))
+}
 
-    let mut saw_const = false;
-    let mut candidate = None;
-    let mut comment_ranges = Vec::new();
-    collect_comment_ranges(node, &mut comment_ranges);
-    comment_ranges.sort_unstable();
-    let mut next_comment = 0;
-    let mut index = node.start_byte();
+fn starts_php_identifier(byte: u8) -> bool {
+    byte.is_ascii_alphabetic() || byte == b'_'
+}
 
-    while index < node.end_byte() {
-        if next_comment < comment_ranges.len() && index == comment_ranges[next_comment].0 {
-            index = comment_ranges[next_comment].1;
-            next_comment += 1;
-            continue;
-        }
-
-        let byte = source[index];
-        if byte == b'=' {
-            let (start, end) = candidate?;
-            let name = &source[start..end];
-            let is_known_reserved_name = RESERVED_NAMES
-                .iter()
-                .any(|reserved| name.eq_ignore_ascii_case(reserved));
-            if saw_const && is_known_reserved_name {
-                return Some(start);
-            }
-            return None;
-        }
-
-        if saw_const && matches!(byte, b';' | b'{' | b'}') {
-            return None;
-        }
-
-        if byte.is_ascii_alphabetic() || byte == b'_' {
-            let start = index;
-            index += 1;
-            while index < node.end_byte()
-                && (source[index].is_ascii_alphanumeric() || source[index] == b'_')
-            {
-                index += 1;
-            }
-
-            let identifier = &source[start..index];
-            if identifier.eq_ignore_ascii_case(b"const") {
-                saw_const = true;
-                candidate = None;
-            } else if saw_const {
-                candidate = Some((start, index));
-            }
-            continue;
-        }
-
+fn php_identifier_end(source: &[u8], mut index: usize, end: usize) -> usize {
+    while index < end && (source[index].is_ascii_alphanumeric() || source[index] == b'_') {
         index += 1;
     }
-
-    None
+    index
 }
 
 fn collect_comment_ranges(node: Node<'_>, ranges: &mut Vec<(usize, usize)>) {

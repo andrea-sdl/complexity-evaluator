@@ -1,9 +1,10 @@
 # `core-v1` compatibility results
 
-Status: v2 differential passed
+Status: v2 differential and v0.3 extension checks passed
 
 These results freeze evidence from `complexity-js` and `complexity-php`
-`0.1.0` and record the completed `complexity` `0.2.0` differential.
+`0.1.0`, record the completed `complexity` `0.2.0` differential, and record
+local Rust and Python evidence for `0.3.0`.
 
 ## JS/TS local fixtures
 
@@ -123,3 +124,23 @@ language, file status, function identity, name, kind, range, score,
 The normalization removed only the planned tool metadata, schema v2 wrapper,
 file and function signal fields, and added summary signal fields. The 74 runs
 had zero differences.
+
+## V0.3 Rust and Python record
+
+Rust and Python have no old local tool for a differential. Their evidence uses
+new exact fixtures plus the unchanged JS/TS and PHP suites.
+
+| Check | Result |
+| --- | --- |
+| Rust callable, score, contribution, signal, position, threshold, and parse cases | 5 of 5 tests passed |
+| Python callable, score, contribution, signal, position, threshold, and parse cases | 7 of 7 tests passed |
+| Nested decorated Python callable boundary | Parent score and signals remain zero |
+| Python `try ... else` control depth | Empty else body reports one active region |
+| Five-language ordering, filters, and stdin | Passed in 39 public CLI tests |
+| Rust self-analysis | 7 files, 407 functions, max score 5, zero errors, byte-stable JSON |
+| Repository complexity ratchet | Public CLI test pins max score 7, ordered source paths, and per-file function counts |
+| Full all-target suite | 97 tests passed |
+
+The existing 48 JS/TS and 26 PHP differential results remain unchanged. No live
+SonarRust or SonarPython comparison has run. These local tests do not support a
+compatibility percentage.

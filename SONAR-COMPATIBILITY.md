@@ -1,8 +1,8 @@
 # Sonar compatibility boundary
 
-`complexity` `0.2.0` uses the local `core-v1` profile. The merge must preserve
-the old language scores. It does not claim general Sonar or SonarSource
-compatibility.
+`complexity` `0.3.0` uses the local `core-v1` profile. The Rust and Python
+extension preserves the old language scores. It does not claim general Sonar
+or SonarSource compatibility.
 
 ## Evidence map
 
@@ -10,6 +10,8 @@ compatibility.
 | --- | --- | --- | --- |
 | JS/TS | SonarJS S3776 at `2206d123` | Yes | None |
 | PHP | SonarPHP at `cd5c3c244ec1f051ace71e0d07f5313e4c1f9d3e` | Yes | One Agentforce corpus against SonarPHP `3.58.0.16263` |
+| Rust | SonarRust at `9539d0c59f8965663fd3efa616a492a4c65315f3` | Yes | None |
+| Python | SonarPython at `322e2dcb2a1bcab654614fffa394a8db43b9ef16` | Yes | None |
 
 The source targets and the live PHP analyzer are different evidence. Do not
 describe the live run as a run of the frozen source revision.
@@ -102,6 +104,35 @@ All measured gaps matched the two planned profile differences:
 The Sonar Web API gave positive function identity, score, issue location, and
 threshold results. It did not give a stable ordered contribution vector.
 
+## Rust frozen profile
+
+The Rust fixtures cover function and method ownership, closures, Unicode
+positions, branches, loops, `match`, labeled jumps, logical sequences, match
+guards, let-else, opaque macros, thresholds, signals, and parse failure.
+
+The score rules follow the named SonarRust visitor for those syntax-local
+constructs. Nested functions and closures are one planned difference:
+`complexity` reports them separately and excludes them from their parent.
+
+Five Rust integration tests pass. This is local fixture evidence. No live
+SonarRust run exists, so no compatibility percentage is valid.
+
+## Python frozen profile
+
+The Python fixtures cover sync and async definitions, methods, lambdas,
+decorators, nested callable ownership, branches, loops and loop `else`,
+exception handlers, try `else`, ternaries, logical sequences, neutral `match`
+and `with`, case guards, Unicode positions, thresholds, signals, and parse
+failure.
+
+The score rules follow the named SonarPython visitor for those syntax-local
+constructs. Nested functions and lambdas use the same planned ownership
+difference as Rust. Python `match` remains score-neutral because the reviewed
+visitor does not score it.
+
+Six Python integration tests pass. This is local fixture evidence. No live
+SonarPython run exists, so no compatibility percentage is valid.
+
 ## Parser gaps are separate
 
 The bounded reserved-word class-constant retry fixes a known
@@ -125,10 +156,28 @@ and `0`. The comparison found no function identity, kind, name, range, score,
 threshold result, ordered contribution, diagnostic, stderr, or exit
 difference. See [COMPATIBILITY-RESULTS.md](COMPATIBILITY-RESULTS.md).
 
-## Work still needed
+## Work needed for an 80–90% claim
 
-- Run JS/TS against a named live SonarJS build.
-- Save a repeatable SonarPHP runner.
-- Test more independent PHP corpora.
-- Publish all mismatches and corpus metadata.
-- Track later analyzer and parser versions as new targets, not silent updates.
+The Rust and Python MVP does not claim 80–90% Sonar compatibility. Reaching a
+measured claim needs:
+
+1. Repeatable runners for named SonarRust and SonarPython builds with only
+   S3776 enabled at threshold `0`.
+2. Independent Rust and Python corpora that cover common syntax, not only
+   project fixtures.
+3. Stable mapping from Sonar issue ranges to local callable identities.
+4. Exact score comparison over the positive identity union and over matched
+   identities.
+5. Published parser failures, identity gaps, score gaps, corpus revisions, and
+   analyzer versions.
+6. A separate threshold-15 comparison.
+7. An explicit treatment of the planned nested-callable ownership difference,
+   either as a compatibility mode or as a disclosed mismatch class.
+
+The local scorer and report evidence are ready for these runs. The live
+analyzer harnesses and independent corpora are not. Adding them is more than a
+small parser extension, so they stay incremental work.
+
+JS/TS still needs the same live proof. PHP still needs a saved runner and more
+independent corpora. Track later analyzer and parser versions as new targets,
+not silent updates.

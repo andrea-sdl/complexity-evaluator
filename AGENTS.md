@@ -12,8 +12,8 @@ Read [README.md](README.md), [SPEC.md](SPEC.md), [DESIGN.md](DESIGN.md), and
 4. Preserve all `core-v1` scores, contributions, ranges, and parser error
    rules. Do not change a score without an approved fixture that shows why.
 5. Ask for approval before you add a production dependency.
-6. Keep the two parser engines separate. Share only the CLI, discovery, report,
-   sort, format, summary, and exit flow described in `DESIGN.md`.
+6. Keep the five parser engines separate. Share only the CLI, discovery,
+   report, sort, format, summary, and exit flow described in `DESIGN.md`.
 7. Before handoff, run:
 
    ```sh
