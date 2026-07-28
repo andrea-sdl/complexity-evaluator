@@ -8,6 +8,7 @@ use oxc::{
         VariableDeclarator,
     },
     ast_visit::{Visit, walk},
+    diagnostics::Diagnostics,
     parser::Parser,
     span::{GetSpan, SourceType, Span},
     syntax::scope::ScopeFlags,
@@ -24,24 +25,32 @@ pub(crate) fn analyze_source(path: &str, source: &str, max_complexity: u32) -> F
     let allocator = Allocator::default();
     let parsed = Parser::new(&allocator, source, source_type).parse();
 
-    if !parsed.panicked && parsed.diagnostics.is_empty() {
-        let mut collector = FunctionCollector::new(source, path, max_complexity);
-        collector.visit_program(&parsed.program);
-        let functions = collector.finish();
-        let function_count = functions.len();
-        return FileResult {
-            path: path.to_string(),
-            language,
-            status: FileStatus::Ok,
-            signals: Some(FileSignals { function_count }),
-            functions,
-            diagnostics: Vec::new(),
-        };
+    if parsed.panicked || !parsed.diagnostics.is_empty() {
+        return parse_error_result(path, source, language, parsed.diagnostics);
     }
 
+    let mut collector = FunctionCollector::new(source, path, max_complexity);
+    collector.visit_program(&parsed.program);
+    let functions = collector.finish();
+    let function_count = functions.len();
+    FileResult {
+        path: path.to_string(),
+        language,
+        status: FileStatus::Ok,
+        signals: Some(FileSignals { function_count }),
+        functions,
+        diagnostics: Vec::new(),
+    }
+}
+
+fn parse_error_result(
+    path: &str,
+    source: &str,
+    language: String,
+    parser_diagnostics: Diagnostics,
+) -> FileResult {
     let positions = SourcePositions::new(source);
-    let mut diagnostics = parsed
-        .diagnostics
+    let mut diagnostics = parser_diagnostics
         .into_iter()
         .map(|diagnostic| {
             let offset = diagnostic
@@ -636,30 +645,24 @@ impl<'source> Scorer<'source> {
         let end = usize::try_from(end).expect("Oxc span fits usize");
         let mut offset = start;
         while offset < end {
-            let remainder = &self.source[offset..end];
+            let remainder = self.source[offset..end].trim_start();
+            offset = end - remainder.len();
             if remainder.starts_with(token) {
                 return u32::try_from(offset).expect("source offset fits u32");
             }
-            if remainder.starts_with("//") {
-                offset += remainder.find('\n').unwrap_or(remainder.len());
-                continue;
-            }
-            if remainder.starts_with("/*") {
-                let comment_end = remainder
-                    .find("*/")
-                    .expect("Oxc comments are terminated before the following token");
-                offset += comment_end + 2;
-                continue;
-            }
-            let character = remainder
-                .chars()
-                .next()
-                .expect("offset stays within the source");
-            if character.is_whitespace() {
-                offset += character.len_utf8();
-                continue;
-            }
-            panic!("expected Oxc syntax token after child span");
+            offset += match remainder {
+                "" => panic!("expected Oxc syntax token before node end"),
+                remainder if remainder.starts_with("//") => {
+                    remainder.find('\n').unwrap_or(remainder.len())
+                }
+                remainder if remainder.starts_with("/*") => {
+                    remainder
+                        .find("*/")
+                        .expect("Oxc comments are terminated before the following token")
+                        + 2
+                }
+                _ => panic!("expected Oxc syntax token after child span"),
+            };
         }
         panic!("expected Oxc syntax token before node end");
     }
@@ -826,25 +829,22 @@ impl<'ast, 'source> Visit<'ast> for Scorer<'source> {
     }
 
     fn visit_logical_expression(&mut self, expression: &oxc::ast::ast::LogicalExpression<'ast>) {
+        let mut operators = Vec::new();
         if self.logical_depth == 0 {
-            let mut operators = Vec::new();
             collect_logical_operators(expression, &mut operators);
-            let mut previous_was_and = false;
-            for operator in operators {
-                let is_and = operator.operator.is_and();
-                if is_and
-                    && !previous_was_and
-                    && !self.suppressed_logical_spans.contains(&operator.span)
-                {
-                    let token = self.token_after(
-                        operator.left.span().end,
-                        operator.right.span().start,
-                        "&&",
-                    );
-                    self.add("logical_and", token, 0);
-                }
-                previous_was_and = is_and;
+        }
+        let mut previous_was_and = false;
+        for operator in operators {
+            let is_and = operator.operator.is_and();
+            if is_and
+                && !previous_was_and
+                && !self.suppressed_logical_spans.contains(&operator.span)
+            {
+                let token =
+                    self.token_after(operator.left.span().end, operator.right.span().start, "&&");
+                self.add("logical_and", token, 0);
             }
+            previous_was_and = is_and;
         }
         self.logical_depth += 1;
         self.visit_expression(&expression.left);

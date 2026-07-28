@@ -1,6 +1,8 @@
 mod javascript;
 pub(crate) mod model;
 mod php;
+mod python;
+mod rust;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
@@ -11,7 +13,7 @@ use ignore::{WalkBuilder, gitignore::GitignoreBuilder};
 use model::{FileResult, FileStatus, Report, RunStatus, Summary, Tool};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const USAGE: &str = "Usage: complexity [--language javascript|typescript|php]... \
+pub const USAGE: &str = "Usage: complexity [--language javascript|typescript|php|rust|python]... \
 [--format text|json] [--max-complexity N] [--stdin-filename PATH] <path...|->";
 
 const DEFAULT_MAX_COMPLEXITY: u32 = 15;
@@ -39,11 +41,19 @@ struct Options {
     paths: Vec<PathBuf>,
 }
 
+struct OptionParser {
+    options: Options,
+    format_seen: bool,
+    max_complexity_seen: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum LanguageFilter {
     JavaScript,
     TypeScript,
     Php,
+    Rust,
+    Python,
 }
 
 enum Command {
@@ -70,124 +80,195 @@ where
 }
 
 fn parse_options(arguments: Vec<OsString>) -> Result<Command, String> {
-    if arguments.len() == 1 && arguments[0] == "--help" {
-        return Ok(Command::Help);
-    }
-    if arguments.len() == 1 && arguments[0] == "--version" {
-        return Ok(Command::Version);
+    if let Some(command) = sole_command(&arguments) {
+        return Ok(command);
     }
 
-    let mut format = OutputFormat::Text;
-    let mut format_seen = false;
-    let mut max_complexity = DEFAULT_MAX_COMPLEXITY;
-    let mut max_complexity_seen = false;
-    let mut languages = BTreeSet::new();
-    let mut stdin_filename = None;
-    let mut paths = Vec::new();
-    let mut index = 0;
+    let mut parser = OptionParser::new();
+    let mut arguments = arguments.into_iter();
 
-    while index < arguments.len() {
-        let argument = arguments[index]
+    while let Some(argument) = arguments.next() {
+        let argument = argument
             .to_str()
             .ok_or_else(|| "selected path is not valid UTF-8".to_string())?;
+        parser.add_argument(argument, &mut arguments)?;
+    }
+
+    Ok(Command::Run(parser.finish()?))
+}
+
+impl OptionParser {
+    fn new() -> Self {
+        Self {
+            options: Options {
+                format: OutputFormat::Text,
+                max_complexity: DEFAULT_MAX_COMPLEXITY,
+                languages: BTreeSet::new(),
+                stdin_filename: None,
+                paths: Vec::new(),
+            },
+            format_seen: false,
+            max_complexity_seen: false,
+        }
+    }
+
+    fn add_argument(
+        &mut self,
+        argument: &str,
+        arguments: &mut impl Iterator<Item = OsString>,
+    ) -> Result<(), String> {
         match argument {
             "--language" => {
-                index += 1;
-                let value = arguments.get(index).ok_or_else(|| {
-                    "--language requires javascript, typescript, or php".to_string()
-                })?;
-                let value = value
-                    .to_str()
-                    .ok_or_else(|| "--language value is not valid UTF-8".to_string())?;
-                let language = match value {
-                    "javascript" => LanguageFilter::JavaScript,
-                    "typescript" => LanguageFilter::TypeScript,
-                    "php" => LanguageFilter::Php,
-                    _ => {
-                        return Err(
-                            "--language requires javascript, typescript, or php".to_string()
-                        );
-                    }
-                };
-                languages.insert(language);
+                self.options.languages.insert(parse_language(arguments)?);
             }
-            "--format" => {
-                if format_seen {
-                    return Err("--format cannot be repeated".to_string());
-                }
-                format_seen = true;
-                index += 1;
-                let value = arguments
-                    .get(index)
-                    .ok_or_else(|| "--format requires text or json".to_string())?;
-                let value = value
-                    .to_str()
-                    .ok_or_else(|| "--format value is not valid UTF-8".to_string())?;
-                format = match value {
-                    "text" => OutputFormat::Text,
-                    "json" => OutputFormat::Json,
-                    _ => return Err("--format requires text or json".to_string()),
-                };
-            }
-            "--max-complexity" => {
-                if max_complexity_seen {
-                    return Err("--max-complexity cannot be repeated".to_string());
-                }
-                max_complexity_seen = true;
-                index += 1;
-                let value = arguments.get(index).ok_or_else(|| {
-                    "--max-complexity requires a non-negative integer".to_string()
-                })?;
-                let value = value
-                    .to_str()
-                    .ok_or_else(|| "--max-complexity value is not valid UTF-8".to_string())?;
-                max_complexity = value
-                    .parse()
-                    .map_err(|_| "--max-complexity requires a non-negative integer".to_string())?;
-            }
-            "--stdin-filename" => {
-                if stdin_filename.is_some() {
-                    return Err("--stdin-filename cannot be repeated".to_string());
-                }
-                index += 1;
-                let value = arguments
-                    .get(index)
-                    .ok_or_else(|| "--stdin-filename requires a path".to_string())?;
-                let value = value
-                    .to_str()
-                    .ok_or_else(|| "--stdin-filename value is not valid UTF-8".to_string())?;
-                stdin_filename = Some(value.to_string());
-            }
-            "-" => paths.push(PathBuf::from("-")),
+            "--format" => self.set_format(arguments)?,
+            "--max-complexity" => self.set_max_complexity(arguments)?,
+            "--stdin-filename" => self.set_stdin_filename(arguments)?,
+            "-" => self.options.paths.push(PathBuf::from("-")),
             value if value.starts_with('-') => {
                 return Err(format!("unknown option: {value}"));
             }
-            value => paths.push(PathBuf::from(value)),
+            value => self.options.paths.push(PathBuf::from(value)),
         }
-        index += 1;
+
+        Ok(())
     }
 
+    fn set_format(&mut self, arguments: &mut impl Iterator<Item = OsString>) -> Result<(), String> {
+        if self.format_seen {
+            return Err("--format cannot be repeated".to_string());
+        }
+
+        self.format_seen = true;
+        self.options.format = parse_format(arguments)?;
+        Ok(())
+    }
+
+    fn set_max_complexity(
+        &mut self,
+        arguments: &mut impl Iterator<Item = OsString>,
+    ) -> Result<(), String> {
+        if self.max_complexity_seen {
+            return Err("--max-complexity cannot be repeated".to_string());
+        }
+
+        self.max_complexity_seen = true;
+        self.options.max_complexity = parse_max_complexity(arguments)?;
+        Ok(())
+    }
+
+    fn set_stdin_filename(
+        &mut self,
+        arguments: &mut impl Iterator<Item = OsString>,
+    ) -> Result<(), String> {
+        if self.options.stdin_filename.is_some() {
+            return Err("--stdin-filename cannot be repeated".to_string());
+        }
+
+        self.options.stdin_filename = Some(option_value(arguments, "--stdin-filename", "a path")?);
+        Ok(())
+    }
+
+    fn finish(self) -> Result<Options, String> {
+        validate_input_options(
+            &self.options.paths,
+            &self.options.languages,
+            self.options.stdin_filename.is_some(),
+        )?;
+        Ok(self.options)
+    }
+}
+
+fn sole_command(arguments: &[OsString]) -> Option<Command> {
+    if arguments.len() != 1 {
+        return None;
+    }
+
+    match arguments[0].to_str()? {
+        "--help" => Some(Command::Help),
+        "--version" => Some(Command::Version),
+        _ => None,
+    }
+}
+
+fn parse_language(
+    arguments: &mut impl Iterator<Item = OsString>,
+) -> Result<LanguageFilter, String> {
+    match option_value(
+        arguments,
+        "--language",
+        "javascript, typescript, php, rust, or python",
+    )?
+    .as_str()
+    {
+        "javascript" => Ok(LanguageFilter::JavaScript),
+        "typescript" => Ok(LanguageFilter::TypeScript),
+        "php" => Ok(LanguageFilter::Php),
+        "rust" => Ok(LanguageFilter::Rust),
+        "python" => Ok(LanguageFilter::Python),
+        _ => Err("--language requires javascript, typescript, php, rust, or python".to_string()),
+    }
+}
+
+fn parse_format(arguments: &mut impl Iterator<Item = OsString>) -> Result<OutputFormat, String> {
+    match option_value(arguments, "--format", "text or json")?.as_str() {
+        "text" => Ok(OutputFormat::Text),
+        "json" => Ok(OutputFormat::Json),
+        _ => Err("--format requires text or json".to_string()),
+    }
+}
+
+fn parse_max_complexity(arguments: &mut impl Iterator<Item = OsString>) -> Result<u32, String> {
+    option_value(arguments, "--max-complexity", "a non-negative integer")?
+        .parse()
+        .map_err(|_| "--max-complexity requires a non-negative integer".to_string())
+}
+
+fn option_value(
+    arguments: &mut impl Iterator<Item = OsString>,
+    option: &str,
+    required_value: &str,
+) -> Result<String, String> {
+    let value = arguments
+        .next()
+        .ok_or_else(|| format!("{option} requires {required_value}"))?;
+    value
+        .into_string()
+        .map_err(|_| format!("{option} value is not valid UTF-8"))
+}
+
+fn validate_input_options(
+    paths: &[PathBuf],
+    languages: &BTreeSet<LanguageFilter>,
+    has_stdin_filename: bool,
+) -> Result<(), String> {
     if paths.is_empty() {
         return Err("at least one path is required".to_string());
     }
+
     let reads_stdin = paths.iter().any(|path| path == Path::new("-"));
-    if reads_stdin && paths.len() != 1 {
-        return Err("- must be the sole input".to_string());
+    if reads_stdin {
+        return validate_stdin_input(paths, languages);
     }
-    if reads_stdin && languages.len() != 1 {
-        return Err("stdin requires exactly one language".to_string());
-    }
-    if !reads_stdin && stdin_filename.is_some() {
+    if has_stdin_filename {
         return Err("--stdin-filename is valid only with -".to_string());
     }
 
-    Ok(Command::Run(Options {
-        format,
-        max_complexity,
-        languages,
-        stdin_filename,
-        paths,
-    }))
+    Ok(())
+}
+
+fn validate_stdin_input(
+    paths: &[PathBuf],
+    languages: &BTreeSet<LanguageFilter>,
+) -> Result<(), String> {
+    if paths.len() != 1 {
+        return Err("- must be the sole input".to_string());
+    }
+    if languages.len() != 1 {
+        return Err("stdin requires exactly one language".to_string());
+    }
+
+    Ok(())
 }
 
 fn run_analysis(options: Options, cwd: &Path) -> CommandOutput {
@@ -268,6 +349,8 @@ fn default_stdin_filename(language: LanguageFilter) -> &'static str {
         LanguageFilter::JavaScript => "stdin.js",
         LanguageFilter::TypeScript => "stdin.ts",
         LanguageFilter::Php => "stdin.php",
+        LanguageFilter::Rust => "stdin.rs",
+        LanguageFilter::Python => "stdin.py",
     }
 }
 
@@ -300,36 +383,7 @@ fn select_files(
 ) -> Result<Vec<(PathBuf, String, String)>, String> {
     let mut files = BTreeMap::new();
     for supplied in paths {
-        let candidate = if supplied.is_absolute() {
-            supplied.clone()
-        } else {
-            cwd.join(supplied)
-        };
-        let metadata = std::fs::symlink_metadata(&candidate)
-            .map_err(|error| format!("cannot resolve {}: {error}", supplied.display()))?;
-        let canonical = candidate
-            .canonicalize()
-            .map_err(|error| format!("cannot resolve {}: {error}", supplied.display()))?;
-        if !canonical.starts_with(cwd) {
-            return Err(format!(
-                "path is outside the working directory: {}",
-                supplied.display()
-            ));
-        }
-        if metadata.file_type().is_symlink() && canonical.is_dir() {
-            continue;
-        }
-        if canonical.is_file() {
-            add_explicit_file(&canonical, supplied, languages, cwd, &mut files)?;
-            continue;
-        }
-        if canonical.is_dir() {
-            if !is_skipped_path(&canonical, cwd)? {
-                discover_directory(&canonical, languages, cwd, &mut files)?;
-            }
-            continue;
-        }
-        return Err(format!("unsupported input path: {}", supplied.display()));
+        select_input(supplied, languages, cwd, &mut files)?;
     }
     if files.is_empty() {
         return Err("no selected files found".to_string());
@@ -338,6 +392,59 @@ fn select_files(
         .into_iter()
         .map(|(relative, (absolute, language))| (absolute, relative, language))
         .collect())
+}
+
+fn select_input(
+    supplied: &Path,
+    languages: &BTreeSet<LanguageFilter>,
+    cwd: &Path,
+    files: &mut BTreeMap<String, (PathBuf, String)>,
+) -> Result<(), String> {
+    let resolved = resolve_input(supplied, cwd)?;
+    if resolved.is_directory_symlink {
+        return Ok(());
+    }
+    if resolved.canonical.is_file() {
+        return add_explicit_file(&resolved.canonical, supplied, languages, cwd, files);
+    }
+    if !resolved.canonical.is_dir() {
+        return Err(format!("unsupported input path: {}", supplied.display()));
+    }
+    if is_skipped_path(&resolved.canonical, cwd)? {
+        return Ok(());
+    }
+
+    discover_directory(&resolved.canonical, languages, cwd, files)
+}
+
+struct ResolvedInput {
+    canonical: PathBuf,
+    is_directory_symlink: bool,
+}
+
+fn resolve_input(supplied: &Path, cwd: &Path) -> Result<ResolvedInput, String> {
+    let candidate = if supplied.is_absolute() {
+        supplied.to_path_buf()
+    } else {
+        cwd.join(supplied)
+    };
+    let metadata = std::fs::symlink_metadata(&candidate)
+        .map_err(|error| format!("cannot resolve {}: {error}", supplied.display()))?;
+    let canonical = candidate
+        .canonicalize()
+        .map_err(|error| format!("cannot resolve {}: {error}", supplied.display()))?;
+
+    if !canonical.starts_with(cwd) {
+        return Err(format!(
+            "path is outside the working directory: {}",
+            supplied.display()
+        ));
+    }
+
+    Ok(ResolvedInput {
+        is_directory_symlink: metadata.file_type().is_symlink() && canonical.is_dir(),
+        canonical,
+    })
 }
 
 fn add_explicit_file(
@@ -377,41 +484,70 @@ fn discover_directory(
 
     for entry in walker {
         let entry = entry.map_err(|error| format!("directory discovery failed: {error}"))?;
-        let Some(file_type) = entry.file_type() else {
-            continue;
-        };
-        let is_file_symlink = file_type.is_symlink();
-        if !file_type.is_file() && !is_file_symlink {
-            continue;
-        }
-        let canonical = entry
-            .path()
-            .canonicalize()
-            .map_err(|error| format!("cannot resolve {}: {error}", entry.path().display()))?;
-        if !canonical.starts_with(cwd) {
-            return Err(format!(
-                "discovered path is outside the working directory: {}",
-                entry.path().display()
-            ));
-        }
-        if !canonical.is_file() {
-            continue;
-        }
-        if is_skipped_path(&canonical, cwd)? {
-            continue;
-        }
-        if is_file_symlink && is_ignored_path(&canonical, cwd)? {
-            continue;
-        }
-        let Some((family, language)) = language_for_path(&canonical) else {
-            continue;
-        };
-        if !language_is_selected(family, languages) {
-            continue;
-        }
-        insert_file(&canonical, cwd, language, files)?;
+        add_discovered_file(entry, languages, cwd, files)?;
     }
     Ok(())
+}
+
+fn add_discovered_file(
+    entry: ignore::DirEntry,
+    languages: &BTreeSet<LanguageFilter>,
+    cwd: &Path,
+    files: &mut BTreeMap<String, (PathBuf, String)>,
+) -> Result<(), String> {
+    let Some(resolved) = resolve_discovered_file(entry, cwd)? else {
+        return Ok(());
+    };
+    if resolved.is_symlink && is_ignored_path(&resolved.canonical, cwd)? {
+        return Ok(());
+    }
+    let Some((family, language)) = language_for_path(&resolved.canonical) else {
+        return Ok(());
+    };
+    if !language_is_selected(family, languages) {
+        return Ok(());
+    }
+
+    insert_file(&resolved.canonical, cwd, language, files)
+}
+
+struct ResolvedDiscoveredFile {
+    canonical: PathBuf,
+    is_symlink: bool,
+}
+
+fn resolve_discovered_file(
+    entry: ignore::DirEntry,
+    cwd: &Path,
+) -> Result<Option<ResolvedDiscoveredFile>, String> {
+    let Some(file_type) = entry.file_type() else {
+        return Ok(None);
+    };
+    let is_symlink = file_type.is_symlink();
+    if !file_type.is_file() && !is_symlink {
+        return Ok(None);
+    }
+    let canonical = entry
+        .path()
+        .canonicalize()
+        .map_err(|error| format!("cannot resolve {}: {error}", entry.path().display()))?;
+    if !canonical.starts_with(cwd) {
+        return Err(format!(
+            "discovered path is outside the working directory: {}",
+            entry.path().display()
+        ));
+    }
+    if !canonical.is_file() {
+        return Ok(None);
+    }
+    if is_skipped_path(&canonical, cwd)? {
+        return Ok(None);
+    }
+
+    Ok(Some(ResolvedDiscoveredFile {
+        canonical,
+        is_symlink,
+    }))
 }
 
 fn insert_file(
@@ -504,6 +640,8 @@ fn language_for_path(path: &Path) -> Option<(LanguageFilter, &'static str)> {
         "ts" | "mts" | "cts" => Some((LanguageFilter::TypeScript, "typescript")),
         "tsx" => Some((LanguageFilter::TypeScript, "tsx")),
         "php" => Some((LanguageFilter::Php, "php")),
+        "rs" => Some((LanguageFilter::Rust, "rust")),
+        "py" => Some((LanguageFilter::Python, "python")),
         _ => None,
     }
 }
@@ -537,10 +675,18 @@ fn analyze_selected_file(
 }
 
 fn analyze_source(relative: &str, source: &str, language: &str, max_complexity: u32) -> FileResult {
-    if language == "php" {
-        php::analyze_source(relative, source, max_complexity)
-    } else {
-        javascript::analyze_source(relative, source, max_complexity)
+    match language {
+        "javascript" | "jsx" | "typescript" | "tsx" => {
+            javascript::analyze_source(relative, source, max_complexity)
+        }
+        "php" => php::analyze_source(relative, source, max_complexity),
+        "python" => python::analyze_source(relative, source, max_complexity),
+        "rust" => rust::analyze_source(relative, source, max_complexity),
+        _ => failed_file(
+            relative.to_string(),
+            language.to_string(),
+            "unsupported internal language label".to_string(),
+        ),
     }
 }
 
@@ -559,54 +705,10 @@ fn failed_file(path: String, language: String, message: String) -> FileResult {
 }
 
 fn build_report(max_complexity: u32, files: Vec<FileResult>) -> Report {
-    let mut summary = Summary {
-        files: files.len(),
-        functions: 0,
-        violations: 0,
-        errors: 0,
-        max_score: 0,
-        max_control_depth: 0,
-        max_function_line_span: 0,
-        max_functions_per_file: 0,
-        conditions: 0,
-        max_condition_operators: 0,
-        max_condition_predicates: 0,
-        max_boolean_depth: 0,
-    };
+    let mut summary = empty_summary(files.len());
 
     for file in &files {
-        if file.status != FileStatus::Ok {
-            summary.errors += 1;
-            continue;
-        }
-
-        if let Some(signals) = &file.signals {
-            summary.max_functions_per_file =
-                summary.max_functions_per_file.max(signals.function_count);
-        }
-        for function in &file.functions {
-            summary.functions += 1;
-            if function.over_limit {
-                summary.violations += 1;
-            }
-            summary.max_score = summary.max_score.max(function.score);
-            summary.max_control_depth = summary
-                .max_control_depth
-                .max(function.signals.max_control_depth);
-            summary.max_function_line_span = summary
-                .max_function_line_span
-                .max(function.signals.line_span);
-            summary.conditions += function.signals.condition_count;
-            summary.max_condition_operators = summary
-                .max_condition_operators
-                .max(function.signals.max_condition_operators);
-            summary.max_condition_predicates = summary
-                .max_condition_predicates
-                .max(function.signals.max_condition_predicates);
-            summary.max_boolean_depth = summary
-                .max_boolean_depth
-                .max(function.signals.max_boolean_depth);
-        }
+        update_summary(&mut summary, file);
     }
 
     Report {
@@ -624,6 +726,57 @@ fn build_report(max_complexity: u32, files: Vec<FileResult>) -> Report {
         },
         summary,
         files,
+    }
+}
+
+fn empty_summary(file_count: usize) -> Summary {
+    Summary {
+        files: file_count,
+        functions: 0,
+        violations: 0,
+        errors: 0,
+        max_score: 0,
+        max_control_depth: 0,
+        max_function_line_span: 0,
+        max_functions_per_file: 0,
+        conditions: 0,
+        max_condition_operators: 0,
+        max_condition_predicates: 0,
+        max_boolean_depth: 0,
+    }
+}
+
+fn update_summary(summary: &mut Summary, file: &FileResult) {
+    if file.status != FileStatus::Ok {
+        summary.errors += 1;
+        return;
+    }
+
+    if let Some(signals) = &file.signals {
+        summary.max_functions_per_file = summary.max_functions_per_file.max(signals.function_count);
+    }
+    for function in &file.functions {
+        summary.functions += 1;
+        if function.over_limit {
+            summary.violations += 1;
+        }
+        summary.max_score = summary.max_score.max(function.score);
+        summary.max_control_depth = summary
+            .max_control_depth
+            .max(function.signals.max_control_depth);
+        summary.max_function_line_span = summary
+            .max_function_line_span
+            .max(function.signals.line_span);
+        summary.conditions += function.signals.condition_count;
+        summary.max_condition_operators = summary
+            .max_condition_operators
+            .max(function.signals.max_condition_operators);
+        summary.max_condition_predicates = summary
+            .max_condition_predicates
+            .max(function.signals.max_condition_predicates);
+        summary.max_boolean_depth = summary
+            .max_boolean_depth
+            .max(function.signals.max_boolean_depth);
     }
 }
 
@@ -646,28 +799,7 @@ fn format_json(report: &Report) -> String {
 fn format_text(report: &Report) -> String {
     let mut output = String::new();
     for file in &report.files {
-        for function in &file.functions {
-            let status = if function.over_limit { "FAIL" } else { "PASS" };
-            output.push_str(&format!(
-                "{status} {} {} score={} lines={} control-depth={} conditions={} \
-condition-operators={} condition-predicates={} boolean-depth={}\n",
-                function.id,
-                function.name,
-                function.score,
-                function.signals.line_span,
-                function.signals.max_control_depth,
-                function.signals.condition_count,
-                function.signals.max_condition_operators,
-                function.signals.max_condition_predicates,
-                function.signals.max_boolean_depth,
-            ));
-        }
-        for diagnostic in &file.diagnostics {
-            output.push_str(&format!(
-                "ERROR {}:{}:{} {}\n",
-                file.path, diagnostic.location.line, diagnostic.location.column, diagnostic.message
-            ));
-        }
+        append_file_text(&mut output, file);
     }
     output.push_str(&format!(
         "Summary: files={} functions={} violations={} errors={} max_score={} \
@@ -687,6 +819,31 @@ max_condition_operators={} max_condition_predicates={} max_boolean_depth={}\n",
         report.summary.max_boolean_depth,
     ));
     output
+}
+
+fn append_file_text(output: &mut String, file: &FileResult) {
+    for function in &file.functions {
+        let status = if function.over_limit { "FAIL" } else { "PASS" };
+        output.push_str(&format!(
+            "{status} {} {} score={} lines={} control-depth={} conditions={} \
+condition-operators={} condition-predicates={} boolean-depth={}\n",
+            function.id,
+            function.name,
+            function.score,
+            function.signals.line_span,
+            function.signals.max_control_depth,
+            function.signals.condition_count,
+            function.signals.max_condition_operators,
+            function.signals.max_condition_predicates,
+            function.signals.max_boolean_depth,
+        ));
+    }
+    for diagnostic in &file.diagnostics {
+        output.push_str(&format!(
+            "ERROR {}:{}:{} {}\n",
+            file.path, diagnostic.location.line, diagnostic.location.column, diagnostic.message
+        ));
+    }
 }
 
 fn portable_path(path: &Path) -> Result<String, String> {

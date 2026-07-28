@@ -1,6 +1,6 @@
 # `complexity` specification
 
-Version: `0.2.0`
+Version: `0.3.0`
 
 Schema: `2`
 
@@ -8,17 +8,17 @@ Score profile: `core-v1`
 
 ## Goal
 
-Give an AI and a human one deterministic CLI for JavaScript, TypeScript, and
-PHP function complexity. Preserve the existing language score rules and add
-syntax-only signals for control depth, condition shape, function span, and
-functions per file.
+Give an AI and a human one deterministic CLI for JavaScript, TypeScript, PHP,
+Rust, and Python function complexity. Preserve the existing language score
+rules and add syntax-only signals for control depth, condition shape, function
+span, and functions per file.
 
 Signals are evidence, not quality judgments. They never affect exit status.
 
 ## Command
 
 ```text
-complexity [--language javascript|typescript|php]...
+complexity [--language javascript|typescript|php|rust|python]...
            [--format text|json]
            [--max-complexity N]
            [--stdin-filename PATH]
@@ -28,7 +28,7 @@ complexity [--language javascript|typescript|php]...
 - At least one path or `-` is required.
 - `--format` defaults to `text`.
 - `--max-complexity` defaults to `15` and accepts a non-negative integer.
-- `--language` is repeatable. Omit it to select all three language families.
+- `--language` is repeatable. Omit it to select all five language families.
 - Duplicate language values are accepted once.
 - `--help` and `--version` are valid only as the sole argument.
 - Unknown options, duplicate scalar options, missing values, and unsupported
@@ -51,9 +51,11 @@ Exit `2` takes priority over exit `1`.
 | `javascript` | `.js`, `.jsx`, `.mjs`, `.cjs` |
 | `typescript` | `.ts`, `.tsx`, `.mts`, `.cts` |
 | `php` | `.php` |
+| `rust` | `.rs` |
+| `python` | `.py` |
 
 Extension matching is case-sensitive. File reports keep the source label
-`javascript`, `jsx`, `typescript`, `tsx`, or `php`.
+`javascript`, `jsx`, `typescript`, `tsx`, `php`, `rust`, or `python`.
 
 An explicit supported file excluded by the active language filters is an
 error. Directory discovery skips files outside the selected families. A run
@@ -84,7 +86,7 @@ with no selected files is an error.
 - `--stdin-filename` is valid only with `-`.
 - The virtual filename must be a relative UTF-8 path with no `.` or `..`
   component and an extension matching the selected language.
-- Defaults are `stdin.js`, `stdin.ts`, and `stdin.php`.
+- Defaults are `stdin.js`, `stdin.ts`, `stdin.php`, `stdin.rs`, and `stdin.py`.
 - The virtual filename selects parser mode and supplies report paths and IDs.
 - TypeScript JSX requires a `.tsx` virtual filename.
 - PHP input follows normal file mode and requires normal PHP tags.
@@ -95,7 +97,8 @@ with no selected files is an error.
 
 JavaScript and TypeScript use Oxc with the existing extension-specific source
 modes. PHP uses Tree-sitter `LANGUAGE_PHP` and retains the bounded reserved-word
-class-constant retry.
+class-constant retry. Rust uses `tree-sitter-rust 0.24.2`. Python uses
+`tree-sitter-python 0.25.0`.
 
 The PHP retry applies only inside a class, trait, interface, or enum member
 list. It recognizes `array`, `bool`, `callable`, `false`, `float`, `int`,
@@ -119,6 +122,21 @@ name, and source range. Its stable ID is:
 Nested callables receive separate results, are excluded from their parent, and
 start score and signal state from zero. Top-level script code is not reported.
 Positions are one-based Unicode-scalar line and column numbers.
+
+Rust reports each `function_item` with a body. A function with a `self`
+parameter has kind `method`; other function items have kind `function`.
+Closures have kind `closure` and name `<anonymous>`. Bodyless trait function
+signatures do not produce results. Function and closure ranges use their exact
+parser node. Macro definitions and invocations are opaque; the CLI does not
+expand or score generated syntax.
+
+Python reports synchronous and asynchronous function definitions. A definition
+in a class body has kind `method`; other definitions have kind `function`.
+Lambdas have kind `lambda` and name `<anonymous>`. A decorated function range
+starts at `def` or `async`, not at its decorators. Decorators, annotations, and
+default values are outside the callable score and signals. Function, method,
+and lambda bodies are callable barriers. Class bodies are otherwise
+transparent.
 
 ## Cognitive complexity
 
@@ -211,6 +229,54 @@ PHP contribution rules are `if`, `elseif`, `else`, `else_if`, `loop`,
 `switch`, `match`, `catch`, `ternary`, `logical_sequence`, `pipe`,
 `numbered_jump`, and `goto`.
 
+### Rust score rules
+
+A structural contribution is `1 + current control nesting`. Flat
+contributions add `1` without nesting.
+
+| Construct | Contribution | Nested region |
+| --- | --- | --- |
+| `if` and `if let` | Structural | Consequence |
+| `else if` | Flat `+1`; no separate `else` point | Consequence at the current branch depth |
+| `else` | Flat `+1` | Alternative |
+| `loop`, `while`, `while let`, `for` | Structural | Body |
+| `match` | Structural once | Each arm value |
+| Labeled `break` or `continue` | Flat `+1` | None |
+| Unlabeled `break` or `continue` | `0` | None |
+| Flattened `&&` and `||` sequence | Flat `+1` for the first operator and each operator-type change | None |
+
+Calls, recursion, `return`, `?`, `await`, `yield`, unsafe blocks, async blocks,
+const blocks, let-else, match arms, and match guards add zero by themselves.
+Parentheses do not split a logical sequence.
+
+Rust contribution rules are `if`, `else_if`, `else`, `loop`, `match`,
+`labeled_jump`, and `logical_sequence`.
+
+### Python score rules
+
+A structural contribution is `1 + current control nesting`. Flat
+contributions add `1` without nesting.
+
+| Construct | Contribution | Nested region |
+| --- | --- | --- |
+| `if` | Structural | Body |
+| `elif` | Flat `+1` | Body at the current branch depth |
+| `else` on `if`, `for`, `while`, or `try` | Flat `+1` | Else body |
+| `for`, `async for`, `while` | Structural | Body |
+| Each `except` or `except*` | Structural | Handler body |
+| Conditional expression | Structural | Both result arms |
+| Flattened `and` and `or` sequence | Flat `+1` for the first operator and each operator-type change | None |
+
+`try`, `finally`, `with`, `async with`, `match`, comprehensions, `not`,
+`break`, `continue`, `return`, `raise`, `yield`, `await`, `assert`, recursion,
+and assignment expressions add zero by themselves. A `finally` body adds no
+nesting. Python `match` is intentionally zero in this profile because the
+reviewed SonarPython visitor does not score it. Parentheses do not split a
+logical sequence.
+
+Python contribution rules are `if`, `elif`, `else`, `loop`, `except`,
+`ternary`, and `logical_sequence`.
+
 ## Deterministic signals
 
 ### Function span
@@ -235,10 +301,12 @@ meaning.
   child.
 
 Regions follow each language scorer's executable nested regions for `if`
-branches, loops, switch or match content, catch bodies, and ternary arms.
-Tests and switch or match selectors stay at the incoming depth; the selected
-body or result enters the region. Zero-cost `try` and `finally` do not add
-depth. Nested callables reset depth.
+branches, loops, switch or match content, catch or except bodies, and ternary
+arms. Tests and switch or match selectors stay at the incoming depth; the
+selected body or result enters the region. Rust match arm values enter one
+region. Python match adds no region. Python loop and try else bodies enter one
+region. Zero-cost `try`, `finally`, and `with` do not add depth. Nested
+callables reset depth.
 
 ### Condition records
 
@@ -247,13 +315,17 @@ Record the test expression for:
 - `if`
 - `elseif`
 - spaced `else if`
+- Python `elif`
 - `while`
 - `do while`
 - a present classic `for` test
 - ternary
+- Rust match guards
+- Python case guards
 
-Do not record `foreach`, `for in`, `for of`, switch selectors, match selectors,
-or free Boolean expressions.
+Do not record `foreach`, Rust or Python `for`, JavaScript `for in` or `for of`,
+switch selectors, match selectors, Python comprehension filters, or free
+Boolean expressions.
 
 Each record has:
 
@@ -272,10 +344,13 @@ max_boolean_depth
 | `if` | `if` |
 | PHP `elseif` | `elseif` |
 | Spaced `else if` | `else_if` |
+| Python `elif` | `elif` |
 | `while` | `while` |
 | `do while` | `do_while` |
 | Classic `for` test | `for` |
 | Ternary test | `ternary` |
+| Rust match guard | `match_guard` |
+| Python case guard | `case_guard` |
 
 The location is the start of the test expression. Records sort by location and
 then kind.
@@ -284,6 +359,8 @@ Count these operators:
 
 - JavaScript and TypeScript: `!`, `&&`, `||`, `??`
 - PHP: `!`, `&&`, `||`, `??`, `and`, `or`, `xor`
+- Rust: `!`, `&&`, `||`
+- Python: `not`, `and`, `or`
 
 Do not count comparisons, bitwise operators, PHP pipe, or ternary as Boolean
 operators in the containing condition. A nested ternary gets its own record.
@@ -328,7 +405,7 @@ files
 summary
 ```
 
-`tool` is `{"name":"complexity","version":"0.2.0"}`.
+`tool` is `{"name":"complexity","version":"0.3.0"}`.
 
 Each file uses:
 

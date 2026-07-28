@@ -1,6 +1,6 @@
 # Performance evidence
 
-Status: v2 gates passed
+Status: v2 gates and v0.3 extension checks passed
 
 The old `0.1.0` tools were measured on 2026-07-24. These are local baselines,
 not speed claims for other machines or source sets.
@@ -158,6 +158,68 @@ Measure the release file, not a debug file.
 
 There is no binary-size gate. Do not derive a required size change from the
 local pre-merge files.
+
+## V0.3 five-language mixed record
+
+Version `0.3.0` keeps the old four performance gates unchanged. Rust and Python
+have no pre-0.3 baseline, so this extension records them without a regression
+claim.
+
+| Field | Result |
+| --- | --- |
+| Corpus generator | `benchmarks/generate_corpus.rs` |
+| JavaScript files / functions / bytes | `1 / 10 / 1,580` |
+| TypeScript files / functions / bytes | `1 / 10 / 1,600` |
+| PHP files / functions / bytes | `1 / 10 / 1,386` |
+| Rust files / functions / bytes | `1 / 10 / 1,590` |
+| Python files / functions / bytes | `1 / 10 / 1,410` |
+| Total files / functions / bytes | `5 / 50 / 7,566` |
+| Warm-up count | 2 batches of 100 runs |
+| Measured sample count | 7 batches of 100 runs |
+| Min / median / max runtime | `3.825 / 3.967 / 4.003` ms per run |
+| Runtime samples | `0.393102, 0.382887, 0.400334, 0.399768, 0.382511, 0.396674, 0.399183` s per batch |
+| Median peak RSS | `4.61` MiB |
+| Peak RSS samples | `4,800,512, 4,833,280, 4,816,896, 4,833,280, 4,866,048, 4,800,512, 4,833,280` bytes |
+| Exit result | `0` in every run |
+
+CX-015 refreshed this record after the max-score cleanup. An alternating
+comparison against the installed pre-CX-015 binary measured `3.912` ms for
+the old binary and `3.967` ms for the new binary, a `1.41%` increase.
+
+## V0.3 Rust self-analysis record
+
+The release binary analyzed every Rust source file that implements the CLI.
+The test and measurement set `--max-complexity` to `4294967295` so policy
+violations could not hide parser or report failures.
+
+| Field | Result |
+| --- | --- |
+| Input | `src` with `--language rust` |
+| Files / functions / source bytes | `7 / 407 / 152,621` |
+| Report status / errors | `complete / 0` |
+| Warm-up count | 2 batches of 25 runs |
+| Measured sample count | 7 batches of 25 runs |
+| Min / median / max runtime | `24.806 / 25.145 / 25.688` ms per run |
+| Runtime samples | `0.628621, 0.622688, 0.625632, 0.620139, 0.637096, 0.641266, 0.642192` s per batch |
+| Median peak RSS | `6.38` MiB |
+| Peak RSS samples | `6,684,672, 6,651,904, 6,651,904, 6,684,672, 6,684,672, 6,684,672, 6,799,360` bytes |
+| Determinism | Two JSON reports matched byte for byte in the public test |
+
+The alternating comparison measured `25.157` ms for the installed pre-CX-015
+binary and `25.145` ms for the new binary, a `0.05%` reduction. This paired
+result controls the CX-015 comparison because the earlier absolute run used a
+faster machine state.
+
+## V0.3 binary size
+
+| Artifact | Bytes | MiB | Build profile |
+| --- | ---: | ---: | --- |
+| `target/release/complexity` | 6,550,864 | 6.25 | `release` |
+
+The v0.3 timing used Python's monotonic `perf_counter` around complete process
+batches with report output sent to the null device. Peak RSS came from
+`wait4` for seven separate child processes. The run used the baseline machine
+and release profile stated above.
 
 ## V2 method
 

@@ -84,6 +84,11 @@ fn generate_mixed_corpus(output: &Path) -> std::io::Result<()> {
         javascript_file(MIXED_FUNCTION_COUNT, MIXED_FUNCTION_COUNT),
     )?;
     std::fs::write(output.join("php.php"), php_file(0, MIXED_FUNCTION_COUNT))?;
+    std::fs::write(output.join("rust.rs"), rust_file(0, MIXED_FUNCTION_COUNT))?;
+    std::fs::write(
+        output.join("python.py"),
+        python_file(0, MIXED_FUNCTION_COUNT),
+    )?;
     Ok(())
 }
 
@@ -109,6 +114,30 @@ fn php_file(first_index: usize, function_count: usize) -> String {
         writeln!(
             source,
             "function case_{index}(bool $a, bool $b): int {{\n    if ($a) {{\n        if ($b) {{ return 1; }}\n    }} else {{\n        return 0;\n    }}\n    return 2;\n}}"
+        )
+        .expect("write to string");
+    }
+    source
+}
+
+fn rust_file(first_index: usize, function_count: usize) -> String {
+    let mut source = String::new();
+    for index in first_index..first_index + function_count {
+        writeln!(
+            source,
+            "fn benchmark_{index}(left: bool, right: bool) -> i32 {{\n    if left {{\n        if right {{\n            return {index};\n        }}\n    }} else {{\n        return 0;\n    }}\n    1\n}}"
+        )
+        .expect("write to string");
+    }
+    source
+}
+
+fn python_file(first_index: usize, function_count: usize) -> String {
+    let mut source = String::new();
+    for index in first_index..first_index + function_count {
+        writeln!(
+            source,
+            "def benchmark_{index}(left: bool, right: bool) -> int:\n    if left:\n        if right:\n            return {index}\n    else:\n        return 0\n    return 1"
         )
         .expect("write to string");
     }
@@ -170,17 +199,35 @@ mod tests {
         assert_eq!(
             files
                 .iter()
-                .map(|(name, source)| (name.as_str(), source.matches("function ").count()))
+                .map(|(name, source)| (name.as_str(), mixed_function_count(name, source)))
                 .collect::<Vec<_>>(),
             [
                 ("javascript.js", MIXED_FUNCTION_COUNT),
                 ("php.php", MIXED_FUNCTION_COUNT),
+                ("python.py", MIXED_FUNCTION_COUNT),
+                ("rust.rs", MIXED_FUNCTION_COUNT),
                 ("typescript.ts", MIXED_FUNCTION_COUNT),
             ]
         );
         assert_eq!(files, corpus_files(&second.join("mixed")));
 
         fs::remove_dir_all(output).expect("test corpus should be removable");
+    }
+
+    fn mixed_function_count(name: &str, source: &str) -> usize {
+        if name.ends_with(".rs") {
+            return source
+                .lines()
+                .filter(|line| line.starts_with("fn "))
+                .count();
+        }
+        if name.ends_with(".py") {
+            return source
+                .lines()
+                .filter(|line| line.starts_with("def "))
+                .count();
+        }
+        source.matches("function ").count()
     }
 
     fn assert_layout(

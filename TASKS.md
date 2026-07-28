@@ -142,3 +142,132 @@ Protocol:
   combined five benchmark corpora, migration audit, two independent reviews,
   final documentation, full gates, a real-repository run, and retirement. No
   extra product feature was added.
+
+## CX-009: Freeze the Rust and Python contract
+
+- Status: done
+- Owner: root
+- Scope: version, filters, extensions, stdin defaults, parser choices,
+  callable boundaries, score rules, signals, compatibility limits, and task
+  ownership.
+- Success: Rust and Python tests can use exact expected results without making
+  new product choices.
+- Dependency approval: the owner approved `tree-sitter-rust 0.24.2` and
+  `tree-sitter-python 0.25.0` on 2026-07-28.
+- Evidence: `SPEC.md` defines all new public behavior. `DESIGN.md` records the
+  dependency, compatibility, callable, Python match, and version choices.
+
+## CX-010: Extend the shared CLI
+
+- Status: done
+- Owner: root
+- Depends on: CX-009
+- Scope: pinned dependencies, version, language filters, extensions, stdin
+  defaults, direct dispatch, mixed ordering, and shared CLI tests.
+- Success: the public CLI selects and dispatches all five language families
+  without changing existing JavaScript, TypeScript, or PHP output.
+- Evidence: 39 CLI tests pass, including Rust and Python stdin, repeated
+  filters, five-language stable ordering, version, help, and error cases.
+
+## CX-011: Add the Rust engine
+
+- Status: done
+- Owner: rust_engine
+- Depends on: CX-009, CX-010
+- Scope: `src/rust.rs`, Rust fixtures, and Rust integration tests.
+- Success: exact callable, score, contribution, signal, position, threshold,
+  and parse-error tests pass for `.rs` source.
+- Evidence: all 5 Rust integration tests pass. At CX-011 completion, the
+  release binary analyzed all 7 Rust files in `src` and reported 350 functions
+  with zero errors.
+
+## CX-012: Add the Python engine
+
+- Status: done
+- Owner: python_engine
+- Depends on: CX-009, CX-010
+- Scope: `src/python.rs`, Python fixtures, and Python integration tests.
+- Success: exact callable, score, contribution, signal, position, threshold,
+  and parse-error tests pass for `.py` source.
+- Evidence: the initial 6 Python integration tests pass. A red-green
+  regression test proves Boolean and ternary decorators on nested functions
+  do not leak into their parent.
+
+## CX-013: Self-analysis and final validation
+
+- Status: done
+- Owner: root
+- Depends on: CX-010, CX-011, CX-012
+- Scope: Rust self-analysis, five-language deterministic integration, skill
+  and hook support, compatibility notes, benchmarks, full gates, and reviews.
+- Success: `complexity` analyzes its own Rust source without errors, all
+  required checks pass, and no existing language result changes.
+- Evidence: formatting, strict Clippy, 95 all-target tests, and a release build
+  pass. The five-language mixed corpus reports 50 functions with exit `0`.
+  Rust self-analysis was complete, deterministic, and had zero errors. At
+  CX-013 completion, the explicit skill checker reported 18 policy findings
+  in 350 functions; it did not hide existing debt. The two new Rust hard-limit
+  findings were reduced to target-only span findings. Two independent reviews
+  found one Python decorator boundary bug and two small reader-load issues.
+  The bug was fixed with a red-green test, both reader-load changes were
+  applied, and re-review found no remaining defect.
+
+## CX-014: Make the CLI pass its own readability policy
+
+- Status: done
+- Owner: root
+- Depends on: CX-013
+- Scope: simplify the 18 functions named by the `complexity-cli` skill. Keep
+  related logic in each existing module and add no dependency. Also fix any
+  confirmed defect found by the required independent review.
+- Success: the installed skill reports `PASS` for all Rust source in `src`;
+  exact JS/TS/PHP/Rust/Python fixtures, formatting, strict Clippy, all-target
+  tests, and the locked release build still pass.
+- Work split: `lib.rs`, `php.rs`, `python.rs`, `rust.rs`, and `javascript.rs`
+  have separate owners. Each owner must preserve concurrent work and may edit
+  only its assigned source file.
+- Evidence: the explicit skill checker reports `PASS` for all 7 Rust source
+  files and 398 functions. The maxima are score 10, control depth 3, line span
+  47, and 3 predicates in one condition. Old fixture reports at limits 15 and
+  0 match the pre-change JSON byte for byte. Their SHA-256 values are
+  `1564cd54f94cca80b62366f4eea320c0ee05cd4acc830d316fd6cf80566058eb`
+  and
+  `d448e1c95084251d2ed4809454ce125f7e8ed21b7d4a49850174c119eb212dec`.
+  An independent review found one Python `try ... else` depth defect. A
+  red-green public test fixed it, and focused re-review found no remaining
+  defect. A second review found no reader-load issue or metric gaming.
+  Formatting, strict Clippy, all 96 tests, the locked release build, and the
+  diff check pass. Two self-analysis reports match byte for byte. The refreshed
+  median is `3.185` ms for the mixed corpus and `23.114` ms for self-analysis.
+
+## CX-015: Add the max-score ratchet and reach five
+
+- Status: done
+- Owner: root
+- Depends on: CX-014
+- Scope: add one public self-analysis test with a maximum score of `7`, then
+  reduce the 21 current functions above `5` without changing CLI results or
+  adding a dependency.
+- Success: the new test fails against the starting maximum of `10`, passes
+  after the first refactor batch, and stays green when every Rust source
+  function reaches score `5` or less. Exact fixtures, formatting, strict
+  Clippy, all-target tests, the locked release build, benchmarks, and
+  independent correctness and reader-load reviews must pass.
+- Work split: `tests/cli.rs` and project documents belong to root. Refactor
+  owners may edit only their assigned language module. Each change must keep a
+  syntax rule local or create a real domain boundary; shallow score-moving
+  helpers are out of scope.
+- Evidence: the new public test failed first because the source maximum was
+  `10`, then passed after the first batch reduced it to `7`. The final
+  self-analysis covers all 7 source files and 407 functions with maximum score
+  `5`, control depth `2`, line span `44`, and 3 predicates in one condition.
+  The ratchet pins limit `7`, the ordered source paths, and each file's
+  function count. Fixture JSON at limits `15` and `0` remains byte-identical;
+  the SHA-256 values are
+  `5572e4b67325c63a38a2aadb23c1167ecd156548808ae03f67b90be3cf238fff`
+  and
+  `99edc2ec46f858e077a75b9fe75da30daa31d3cd5617543596faeef51495d256`.
+  Formatting, strict Clippy, all 97 tests, the locked release build, and the
+  diff check pass. Independent correctness and newcomer reviews have no
+  remaining finding. A paired pre/post benchmark measured `+1.41%` on the
+  five-language mixed corpus and `-0.05%` on Rust self-analysis.
