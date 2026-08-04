@@ -494,11 +494,14 @@ Protocol:
 - Depends on: CX-020
 - Scope: make the smallest version-only update from `0.3.0` to `0.3.1`, run
   the documented release checks, and publish the signed annotated
-  `complexity-v0.3.1` tag. Do not change scores, schemas, dependencies, or
-  release behavior.
+  `complexity-v0.3.1` tag. Do not change scores, schemas, dependencies, or the
+  tagged source. Fix only release workflow behavior needed to publish that
+  unchanged tag.
 - Success: current version contracts and CLI expectations report `0.3.1`;
   historical `0.3.0` evidence stays unchanged; the signed release commit and
-  tag reach `main`; and the tag-triggered release workflow starts.
+  tag reach `main`; and the tag-triggered release workflow starts. If the
+  hosted workflow itself fails, fix it without moving the tag and rerun the
+  same tagged source through the workflow's manual recovery input.
 - Preparation evidence: the exact tag validator, formatting, strict Clippy,
   all 116 Rust tests, the locked release build, 11 release tests, 16 skill and
   hook tests, 10 eval tests, and Promptfoo config validation pass. The release
@@ -506,5 +509,11 @@ Protocol:
   and contains the binary, `README.md`, `LICENSE`, and all manifest-listed
   agent files. Signed commit `d1d6309` and signed annotated tag
   `complexity-v0.3.1` are on GitHub and verified. Actions run `30927294187`
-  started for that tag and is queued. Release completion is not yet verified,
-  so this task remains in progress.
+  started for that tag but failed before validation because the Ubuntu 22.04
+  system Python lacked `tomllib`. A focused red-green workflow contract now
+  requires Python 3.11 and an existing-tag manual recovery path. Release
+  recovery checks pass: YAML parsing, the exact tag validator, formatting,
+  strict Clippy, all 116 Rust tests, the locked release build, 12 release
+  tests, 16 skill and hook tests, 10 eval tests, and Promptfoo config
+  validation. Release completion is not yet verified, so this task remains in
+  progress.

@@ -4,6 +4,15 @@ on:
   push:
     tags:
       - "complexity-v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to publish
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
 
 permissions: {}
 
@@ -18,9 +27,15 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
 
       - name: Validate the release tag
-        run: python3 release/package.py validate-tag --tag "${{ github.ref_name }}"
+        run: python3 release/package.py validate-tag --tag "$RELEASE_TAG"
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -92,6 +107,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
 
       - name: Add the Rust target
         run: rustup target add "${{ matrix.target }}"
@@ -100,9 +121,10 @@ jobs:
         run: cargo build --release --locked --target "${{ matrix.target }}"
 
       - name: Build the release package
+        shell: bash
         run: >-
           python release/package.py package
-          --tag "${{ github.ref_name }}"
+          --tag "$RELEASE_TAG"
           --target "${{ matrix.target }}"
           --binary "${{ matrix.binary }}"
           --output-dir dist
@@ -140,9 +162,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >-
-          gh release create "${{ github.ref_name }}"
+          gh release create "$RELEASE_TAG"
           --repo "${{ github.repository }}"
           --verify-tag
-          --title "${{ github.ref_name }}"
+          --title "$RELEASE_TAG"
           --generate-notes
           dist/*

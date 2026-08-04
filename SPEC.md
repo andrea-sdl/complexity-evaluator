@@ -575,7 +575,12 @@ home or its login data.
 
 A pushed tag named `complexity-vX.Y.Z` starts the release flow. `X.Y.Z` must
 match the package version in `Cargo.toml`. A mismatch fails before packaging
-or release creation.
+or release creation. The validation and package jobs use Python 3.11.
+
+For recovery from a workflow-only failure, the same workflow accepts one
+existing tag through manual dispatch. It checks out that unchanged tag and
+runs the same validation, five package jobs, checksum checks, and release job.
+The manual path does not move or replace the tag.
 
 The release builds these native targets with `Cargo.lock`:
 
