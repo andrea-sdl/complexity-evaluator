@@ -486,3 +486,22 @@ Protocol:
   skill and release tests, Rust gates, self-analysis, checksum checks, and an
   independent security and correctness review.
 - Evidence: queued.
+
+## CX-022: Publish test release 0.3.1
+
+- Status: in progress
+- Owner: root
+- Depends on: CX-020
+- Scope: make the smallest version-only update from `0.3.0` to `0.3.1`, run
+  the documented release checks, and publish the signed annotated
+  `complexity-v0.3.1` tag. Do not change scores, schemas, dependencies, or
+  release behavior.
+- Success: current version contracts and CLI expectations report `0.3.1`;
+  historical `0.3.0` evidence stays unchanged; the signed release commit and
+  tag reach `main`; and the tag-triggered release workflow starts.
+- Preparation evidence: the exact tag validator, formatting, strict Clippy,
+  all 116 Rust tests, the locked release build, 11 release tests, 16 skill and
+  hook tests, 10 eval tests, and Promptfoo config validation pass. The release
+  binary reports `0.3.1`. A real macOS arm64 archive passed its SHA-256 check
+  and contains the binary, `README.md`, `LICENSE`, and all manifest-listed
+  agent files. The signed commit, tag, and workflow-start proof remain pending.

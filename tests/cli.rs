@@ -85,7 +85,7 @@ fn public_command_describes_the_merged_cli() {
     assert_eq!(version.status.code(), Some(0));
     assert_eq!(
         String::from_utf8(version.stdout).expect("version should be UTF-8"),
-        "complexity 0.3.0\n"
+        "complexity 0.3.1\n"
     );
     assert!(version.stderr.is_empty());
 }
@@ -114,7 +114,7 @@ fn json_reports_one_valid_file_with_no_functions() {
     assert_eq!(
         String::from_utf8(output.stdout).expect("report should be UTF-8"),
         concat!(
-            "{\"schema_version\":2,\"tool\":{\"name\":\"complexity\",\"version\":\"0.3.0\"},",
+            "{\"schema_version\":2,\"tool\":{\"name\":\"complexity\",\"version\":\"0.3.1\"},",
             "\"profile\":\"core-v1\",\"max_complexity\":15,\"status\":\"complete\",",
             "\"files\":[{\"path\":\"src/a.js\",\"language\":\"javascript\",\"status\":\"ok\",",
             "\"signals\":{\"function_count\":0},\"functions\":[],\"diagnostics\":[]}],",
@@ -142,7 +142,7 @@ fn exact_mixed_json_includes_nonzero_signals_and_all_summary_maxima() {
     assert_eq!(
         String::from_utf8(output.stdout).expect("report should be UTF-8"),
         concat!(
-            "{\"schema_version\":2,\"tool\":{\"name\":\"complexity\",\"version\":\"0.3.0\"},",
+            "{\"schema_version\":2,\"tool\":{\"name\":\"complexity\",\"version\":\"0.3.1\"},",
             "\"profile\":\"core-v1\",\"max_complexity\":15,\"status\":\"complete\",\"files\":[",
             "{\"path\":\"a.php\",\"language\":\"php\",\"status\":\"ok\",",
             "\"signals\":{\"function_count\":0},\"functions\":[],\"diagnostics\":[]},",
