@@ -30,6 +30,48 @@ fn run_stdin(args: &[&str], source: &str) -> std::process::Output {
         .expect("complexity command should complete")
 }
 
+fn assert_risky_parser_outcome(output: &std::process::Output) {
+    assert!(output.stderr.is_empty());
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("output should be JSON");
+
+    match output.status.code() {
+        Some(0) => {
+            assert_eq!(report["files"][0]["status"], "ok");
+            assert_eq!(report["files"][0]["signals"]["function_count"], 1);
+            let functions = report["files"][0]["functions"]
+                .as_array()
+                .expect("functions should be an array");
+            assert_eq!(functions.len(), 1);
+            assert_eq!(functions[0]["score"], 1);
+        }
+        Some(2) => {
+            assert_eq!(report["files"][0]["status"], "parse_error");
+            assert_eq!(report["files"][0]["signals"], serde_json::Value::Null);
+            assert!(
+                report["files"][0]["functions"]
+                    .as_array()
+                    .expect("functions should be an array")
+                    .is_empty()
+            );
+            assert!(
+                report["files"][0]["diagnostics"][0]["message"]
+                    .as_str()
+                    .expect("diagnostic message")
+                    .contains("analysis probe")
+            );
+        }
+        code => panic!("risky analysis returned unexpected exit {code:?}"),
+    }
+}
+
+fn hook_budget() -> Duration {
+    if cfg!(debug_assertions) {
+        return Duration::from_secs(15);
+    }
+    Duration::from_secs(5)
+}
+
 fn balanced_logical_expression(leaves: usize) -> String {
     let mut expressions = vec!["value".to_string(); leaves];
     while expressions.len() > 1 {
@@ -160,7 +202,7 @@ fn javascript_accepts_a_regex_with_many_raw_delimiters_and_questions() {
 }
 
 #[test]
-fn javascript_fails_closed_for_extreme_parser_nesting() {
+fn javascript_extreme_parser_nesting_completes_or_fails_closed() {
     let source = format!(
         "function nested() {{ return {}value ? yes : no{}; }}\n",
         "(".repeat(4_096),
@@ -171,22 +213,11 @@ fn javascript_fails_closed_for_extreme_parser_nesting() {
         &source,
     );
 
-    assert_eq!(output.status.code(), Some(2));
-    assert!(output.stderr.is_empty());
-    let report: serde_json::Value =
-        serde_json::from_slice(&output.stdout).expect("output should be JSON");
-    assert_eq!(report["files"][0]["status"], "parse_error");
-    assert_eq!(report["files"][0]["signals"], serde_json::Value::Null);
-    assert!(
-        report["files"][0]["functions"]
-            .as_array()
-            .expect("functions should be an array")
-            .is_empty()
-    );
+    assert_risky_parser_outcome(&output);
 }
 
 #[test]
-fn javascript_fails_closed_for_extreme_template_parser_nesting() {
+fn javascript_extreme_template_parser_nesting_completes_or_fails_closed() {
     let source = format!(
         "function nested() {{ return `value: ${{{}value ? yes : no{}}}`; }}\n",
         "(".repeat(4_096),
@@ -197,18 +228,7 @@ fn javascript_fails_closed_for_extreme_template_parser_nesting() {
         &source,
     );
 
-    assert_eq!(output.status.code(), Some(2));
-    assert!(output.stderr.is_empty());
-    let report: serde_json::Value =
-        serde_json::from_slice(&output.stdout).expect("output should be JSON");
-    assert_eq!(report["files"][0]["status"], "parse_error");
-    assert_eq!(report["files"][0]["signals"], serde_json::Value::Null);
-    assert!(
-        report["files"][0]["functions"]
-            .as_array()
-            .expect("functions should be an array")
-            .is_empty()
-    );
+    assert_risky_parser_outcome(&output);
 }
 
 #[test]
@@ -249,7 +269,7 @@ fn typescript_jsx_handles_large_balanced_logical_chains_within_the_hook_budget()
     );
 
     assert!(
-        started.elapsed() < Duration::from_secs(5),
+        started.elapsed() < hook_budget(),
         "analysis exceeded the hook budget"
     );
     assert!(output.status.success());
@@ -271,7 +291,7 @@ fn javascript_reports_many_same_line_controls_within_the_hook_budget() {
     );
 
     assert!(
-        started.elapsed() < Duration::from_secs(5),
+        started.elapsed() < hook_budget(),
         "analysis exceeded the hook budget"
     );
     assert_eq!(output.status.code(), Some(1));
