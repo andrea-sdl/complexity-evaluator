@@ -1,6 +1,6 @@
 # `complexity` specification
 
-Version: `0.3.0`
+Version: `0.3.1`
 
 Schema: `2`
 
@@ -452,7 +452,7 @@ files
 summary
 ```
 
-`tool` is `{"name":"complexity","version":"0.3.0"}`.
+`tool` is `{"name":"complexity","version":"0.3.1"}`.
 
 Each file uses:
 

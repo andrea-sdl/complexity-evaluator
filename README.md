@@ -4,7 +4,7 @@
 JavaScript, TypeScript, PHP, Rust, and Python. It scans one file, mixed files,
 or directories and gives deterministic text or JSON reports.
 
-Version: `0.3.0`
+Version: `0.3.1`
 
 JSON schema: `2`
 
@@ -28,7 +28,7 @@ cargo install --path .
 
 ## Releases
 
-Push a tag such as `complexity-v0.3.0` to build release archives for Linux
+Push a tag such as `complexity-v0.3.1` to build release archives for Linux
 x64 and arm64, macOS Intel and arm64, and Windows x64. The tag version must
 match `Cargo.toml`.
 
