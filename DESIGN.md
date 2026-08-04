@@ -471,3 +471,17 @@ Why: the project no longer belongs below an umbrella repository path. Keeping
 both histories retains the target's license choice and the available project
 record. Shipping the license with each binary archive keeps the distribution
 terms next to the program.
+
+## D-032: Retry an unchanged release tag after a workflow fault
+
+Decision: keep tag pushes as the normal release trigger. Set up Python 3.11 in
+the validation and native package jobs because the packager uses `tomllib`.
+Also allow a manual dispatch with one existing `complexity-vX.Y.Z` tag. The
+workflow checks out that tag and applies the normal tag and package gates. It
+never moves or replaces the tag.
+
+Why: the first `0.3.1` run used the Ubuntu 22.04 system Python and stopped
+before validation because that Python lacked `tomllib`. A workflow fix cannot
+change an immutable release tag. A narrow manual retry can run the fixed
+workflow against the same tagged source without a tag rewrite or a second
+release path.

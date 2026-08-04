@@ -41,6 +41,10 @@ The release flow lives in this repository. It validates the project once,
 builds each native target with the locked dependency graph, and creates the
 GitHub Release only after all five packages pass.
 
+The tag push is the normal automated path. If a workflow-only fault stops that
+run, dispatch the same workflow with the existing tag after the fix. The retry
+checks out the unchanged tag and runs the same validation and package jobs.
+
 ## Agent support
 
 `agent/skills/complexity-cli` is the explicit-only Codex and Claude skill.
