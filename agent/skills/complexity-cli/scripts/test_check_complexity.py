@@ -111,13 +111,33 @@ def create_merge_conflict(root: Path) -> None:
     (root / "source.ts").write_text("export const value = 2;\n")
     commit_all(root, "task change")
     merge = subprocess.run(
-        ["git", "merge", "--no-edit", "conflict-side"],
+        [
+            "git",
+            "-c",
+            "user.name=Complexity Test",
+            "-c",
+            "user.email=complexity-test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "merge",
+            "--no-edit",
+            "conflict-side",
+        ],
         cwd=root,
         check=False,
         capture_output=True,
     )
     if merge.returncode == 0:
         raise RuntimeError("test setup did not create a merge conflict")
+    unmerged = subprocess.run(
+        ["git", "diff", "--name-only", "--diff-filter=U"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    if unmerged != ["source.ts"]:
+        raise RuntimeError("test setup did not leave source.ts unmerged")
 
 
 class HookHarness:
