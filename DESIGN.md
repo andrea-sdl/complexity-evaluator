@@ -485,3 +485,28 @@ before validation because that Python lacked `tomllib`. A workflow fix cannot
 change an immutable release tag. A narrow manual retry can run the fixed
 workflow against the same tagged source without a tag rewrite or a second
 release path.
+
+## D-033: Keep parser and hook-budget tests portable
+
+Decision: a risky JavaScript or TypeScript probe test accepts either complete
+normal analysis or a structured fail-closed result. This matches D-027 and the
+public parser contract. Debug test binaries get a 15-second timing guard to
+avoid shared-runner and parallel-test noise. The release workflow also runs
+both hook-budget tests alone, in sequence, with an optimized binary and the
+real five-second limit.
+
+The immutable `0.3.1` recovery overlays only the corrected JavaScript test file
+during validation. It first confirms that the tag still points to recorded
+commit `d1d6309`. The corrected test accepts both safe probe outcomes and uses
+the wider debug guard. The overlay is pinned to repair commit `53a3461`, so a
+later dispatch ref cannot change the test. The workflow then runs the full
+suite and the separate optimized hook-budget checks. Package jobs do not use
+the overlay and confirm the same tag commit before they build. This exception
+matches only `complexity-v0.3.1`; later manual retries use their tagged tests
+unchanged.
+
+Why: parser safety depends on whether the child can complete within the host's
+stack. Success and fail-closed are both safe and specified outcomes. A debug
+binary running beside other large tests does not measure the installed CLI's
+hook cost. A test-only overlay fixes validation without changing the signed
+source, skipping a gate, or changing any release artifact.

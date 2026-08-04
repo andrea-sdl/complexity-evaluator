@@ -582,6 +582,15 @@ existing tag through manual dispatch. It checks out that unchanged tag and
 runs the same validation, five package jobs, checksum checks, and release job.
 The manual path does not move or replace the tag.
 
+The immutable `0.3.1` tag has one narrow validation overlay. Its Ubuntu
+recovery checks that the tag still points to its recorded commit, then replaces
+only `tests/javascript.rs` with the corrected file from a fixed repair commit.
+The full test suite then accepts both valid probe outcomes. The workflow also
+runs the two hook-budget tests alone with the optimized release binary and a
+five-second limit. Build jobs use the unchanged tag without the test overlay
+and verify the same recorded commit. Other versions use only their tagged
+tests.
+
 The release builds these native targets with `Cargo.lock`:
 
 | Target | Archive |
