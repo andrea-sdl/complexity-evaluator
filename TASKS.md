@@ -437,36 +437,52 @@ Protocol:
   complexity`, `cargo build --release --locked`, `python3 -m unittest discover
   -s release/tests -p "test_*.py"`, `python3 -m unittest discover -s
   agent/skills/complexity-cli/scripts -p "test_*.py"`, `npm test`, `npm run
-  validate`, and `python3 release/package.py package --tag complexity-v0.3.0
-  --target aarch64-apple-darwin --binary target/release/complexity
-  --output-dir /private/tmp/complexity-migration.4vDvpv/package-check`. The
-  real macOS arm64 archive passed `sha256sum --check --strict` and contained
-  `LICENSE`, `README.md`, the binary, and the full manifest-listed `agent`
-  tree.
+  validate`, and a real local package run for
+  `complexity-v0.3.0` on `aarch64-apple-darwin`. The archive passed its
+  SHA-256 check and contained `LICENSE`, `README.md`, the binary, and the full
+  manifest-listed `agent` tree.
 
 ## CX-021: Package the skill and hooks for Claude Code and Codex
 
 - Status: ready
-- Owner: root
+- Owner: unassigned
 - Depends on: CX-020
-- Scope: add a future installable plugin package for Claude Code and a
-  separate Codex-facing package that reuse the existing
-  `agent/skills/complexity-cli` skill, `agent/hooks/*` samples, and manual eval
-  flow. Do not implement this during the migration. Record the exact install
-  layout, manifest files, and validation steps needed to turn the current
-  agent folder into a user-installable bundle.
-- Success: a later task can package the same skill and hook files without
-  redesigning their behavior. The explicit-only skill must stay explicit-only.
-  Hook samples must stay opt-in and must not auto-enable when the skill is
-  copied. The docs must name the install paths for Claude Code and Codex and
-  the manifest files each package needs.
-- Expected layout: Claude Code package roots should use
-  `.claude-plugin/plugin.json`, `skills/complexity-cli/SKILL.md`, and
-  `hooks/hooks.json` with the existing optional scripts. The Codex package
-  should reuse the same source files and document the matching Codex install
-  layout before code changes start.
-- Validation: the future work must validate the plugin manifest shape, the
-  skill frontmatter, the hook JSON, the install copy paths, and the eval
-  bundle layout. It should also prove that the skill can be installed without
-  enabling hooks and that the hook samples remain separate from the skill.
+- Scope: add installable Claude Code and Codex plugin packages. Generate both
+  from `agent/skills/complexity-cli/**`, `agent/hooks/*`, and the current manual
+  eval files; do not create a second hand-maintained skill or checker. Do not
+  implement this work as part of CX-020.
+- Expected repository layout: use one self-contained
+  `plugins/complexity-evaluator/` payload with
+  `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`,
+  `skills/complexity-cli/**`, host and OS hook samples, `README.md`, and
+  `LICENSE`. Add `.claude-plugin/marketplace.json` and
+  `.agents/plugins/marketplace.json` at the repository root; both catalogs
+  must point to that payload. Each installed or archived payload must work
+  without files outside its own directory.
+- Install rules: the base plugin exposes the skill but does not enable hooks.
+  Keep hook JSON as an explicit opt-in sample unless a host supports a separate
+  opt-in hook component. Add `disable-model-invocation: true` for Claude Code
+  and keep `policy.allow_implicit_invocation: false` for Codex. Use host-root
+  variables or documented install paths in hook commands; never write a local
+  machine path. Require a separately installed `complexity` binary and fail
+  with `BLOCKED` when it is absent.
+- Manifest rules: use the project version, GPL-2.0-only license, canonical
+  repository URL, real author and interface fields, and only fields accepted
+  by each host validator. The Codex marketplace entry must include install and
+  auth policy plus a category. The Claude marketplace entry must use the
+  relative plugin source and must not duplicate the version in two places.
+- Success: a clean Claude Code install and a clean Codex install each expose
+  only the explicit skill. Enabling the matching POSIX or Windows hook sample
+  must check supported changes, ignore unsupported-only changes, filter mixed
+  changes, keep the per-prompt baseline, and stop on `REVISE`, `FAIL`, or
+  `BLOCKED`. Generated plugin copies must match the canonical `agent` files,
+  and release archives must contain no caches, credentials, symlinks, or
+  unlisted files.
+- Validation: add drift and archive contract tests; validate both manifests
+  and marketplaces; run `claude plugin validate .` plus a local marketplace
+  add/install/reload smoke test; run the Codex plugin validator and a clean
+  marketplace install smoke test; invoke the skill manually in each host;
+  enable and test each hook sample separately; run the short Promptfoo eval,
+  skill and release tests, Rust gates, self-analysis, checksum checks, and an
+  independent security and correctness review.
 - Evidence: queued.
