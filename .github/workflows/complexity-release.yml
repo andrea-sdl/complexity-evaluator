@@ -29,6 +29,11 @@ jobs:
           persist-credentials: false
           ref: refs/tags/${{ env.RELEASE_TAG }}
 
+      - name: Verify immutable 0.3.1 source
+        if: github.event_name == 'workflow_dispatch' && env.RELEASE_TAG == 'complexity-v0.3.1'
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "d1d6309386e095b8daaf06a83898ecfca985d909"
+
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -36,6 +41,19 @@ jobs:
 
       - name: Validate the release tag
         run: python3 release/package.py validate-tag --tag "$RELEASE_TAG"
+
+      - name: Check out corrected release tests
+        if: github.event_name == 'workflow_dispatch' && env.RELEASE_TAG == 'complexity-v0.3.1'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: 53a34619058a8a058ff81ee29c33a34d758d067b
+          path: .release-validation
+
+      - name: Overlay corrected 0.3.1 tests
+        if: github.event_name == 'workflow_dispatch' && env.RELEASE_TAG == 'complexity-v0.3.1'
+        shell: bash
+        run: cp .release-validation/tests/javascript.rs tests/javascript.rs
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -45,6 +63,11 @@ jobs:
 
       - name: Run Rust tests
         run: cargo test --locked --all-targets
+
+      - name: Check release hook budget
+        run: >-
+          cargo test --release --locked --test javascript
+          within_the_hook_budget -- --test-threads=1
 
       - name: Build the validation binary
         run: cargo build --locked --bin complexity
@@ -108,6 +131,11 @@ jobs:
         with:
           persist-credentials: false
           ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Verify immutable 0.3.1 source
+        if: github.event_name == 'workflow_dispatch' && env.RELEASE_TAG == 'complexity-v0.3.1'
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "d1d6309386e095b8daaf06a83898ecfca985d909"
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0

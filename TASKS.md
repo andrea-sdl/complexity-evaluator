@@ -515,5 +515,13 @@ Protocol:
   recovery checks pass: YAML parsing, the exact tag validator, formatting,
   strict Clippy, all 116 Rust tests, the locked release build, 12 release
   tests, 16 skill and hook tests, 10 eval tests, and Promptfoo config
-  validation. Release completion is not yet verified, so this task remains in
-  progress.
+  validation. Recovery run `30928244207` passed the fixed Python and tag checks
+  but exposed three Ubuntu-only test faults: two assertions rejected normal
+  probe completion that the spec allows, and a parallel debug timing check
+  exceeded the release hook budget. The portable tests now accept both safe
+  probe outcomes, use a wider debug guard, and keep a separate five-second
+  optimized gate. The immutable `0.3.1` validation confirms tag commit
+  `d1d6309`, overlays only the corrected JavaScript test file from fixed repair
+  commit `53a3461`, and runs the full suite. Package jobs verify and build the
+  unchanged tag without the overlay. Release completion is not yet verified,
+  so this task remains in progress.
