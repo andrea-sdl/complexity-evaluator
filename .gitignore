@@ -1,0 +1,6 @@
+/target/
+/agent/eval/node_modules/
+/agent/eval/.promptfoo/
+__pycache__/
+*.py[cod]
+*.profraw

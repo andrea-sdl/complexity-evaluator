@@ -1,0 +1,21 @@
+{
+  "name": "complexity-policy-evals",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test",
+    "validate": "promptfoo validate config -c promptfooconfig.yaml --env-file promptfoo.env",
+    "eval": "node scripts/run-codex-eval.mjs"
+  },
+  "overrides": {
+    "adm-zip": "0.6.0",
+    "ai": "6.0.237",
+    "sharp": "0.35.3"
+  },
+  "devDependencies": {
+    "promptfoo": "0.121.20"
+  }
+}

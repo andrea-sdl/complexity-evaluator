@@ -1,0 +1,30 @@
+{
+  "skillOverrides": {
+    "complexity-cli": "user-invocable-only"
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py -3 \"agent/skills/complexity-cli/scripts/check_complexity.py\" --baseline-hook",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py -3 \"agent/skills/complexity-cli/scripts/check_complexity.py\" --hook",
+            "timeout": 120,
+            "statusMessage": "Checking code complexity"
+          }
+        ]
+      }
+    ]
+  }
+}
