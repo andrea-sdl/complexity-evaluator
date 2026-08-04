@@ -1,0 +1,148 @@
+name: Complexity release
+
+on:
+  push:
+    tags:
+      - "complexity-v*"
+
+permissions: {}
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate the release tag
+        run: python3 release/package.py validate-tag --tag "${{ github.ref_name }}"
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+      - name: Run Rust tests
+        run: cargo test --locked --all-targets
+
+      - name: Build the validation binary
+        run: cargo build --locked --bin complexity
+
+      - name: Set up Node.js for Promptfoo
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: "24"
+
+      - name: Install the locked Promptfoo dependency
+        run: >-
+          npm ci --prefix agent/eval --ignore-scripts --no-audit --no-fund
+
+      - name: Test the release packager
+        env:
+          COMPLEXITY_BIN: target/debug/complexity
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest discover -s release/tests -p "test_*.py"
+
+      - name: Test the agent skill and hooks
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest discover -s agent/skills/complexity-cli/scripts -p "test_*.py"
+
+      - name: Test the manual Codex eval harness
+        env:
+          COMPLEXITY_BIN: ../../target/debug/complexity
+        run: npm run test --prefix agent/eval
+
+      - name: Validate the manual Codex eval config
+        run: npm run validate --prefix agent/eval
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            binary: target/x86_64-unknown-linux-gnu/release/complexity
+          - runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            binary: target/aarch64-unknown-linux-gnu/release/complexity
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            binary: target/x86_64-apple-darwin/release/complexity
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            binary: target/aarch64-apple-darwin/release/complexity
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            binary: target/x86_64-pc-windows-msvc/release/complexity.exe
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Add the Rust target
+        run: rustup target add "${{ matrix.target }}"
+
+      - name: Build the native binary
+        run: cargo build --release --locked --target "${{ matrix.target }}"
+
+      - name: Build the release package
+        run: >-
+          python release/package.py package
+          --tag "${{ github.ref_name }}"
+          --target "${{ matrix.target }}"
+          --binary "${{ matrix.binary }}"
+          --output-dir dist
+
+      - name: Upload the immutable package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: complexity-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  release:
+    name: Create GitHub Release
+    needs:
+      - validate
+      - build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all native packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: complexity-*
+          path: dist
+          merge-multiple: true
+
+      - name: Verify package checksums
+        working-directory: dist
+        run: sha256sum --check --strict complexity-*.sha256
+
+      - name: Create the release after every build passes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh release create "${{ github.ref_name }}"
+          --repo "${{ github.repository }}"
+          --verify-tag
+          --title "${{ github.ref_name }}"
+          --generate-notes
+          dist/*

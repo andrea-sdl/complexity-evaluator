@@ -1,0 +1,7 @@
+interface:
+  display_name: "Complexity CLI"
+  short_description: "Check JS, TS, PHP, Rust, and Python complexity"
+  default_prompt: "Use $complexity-cli to check the changed JavaScript, TypeScript, PHP, Rust, and Python code."
+
+policy:
+  allow_implicit_invocation: false

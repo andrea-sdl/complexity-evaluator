@@ -1,0 +1,106 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: Can Codex use complexity-cli to make code simpler?
+
+prompts:
+  - label: Improve one complex function
+    raw: |
+      Invoke `$complexity-cli {{ source }}` and follow the installed skill.
+
+      The case ID is `{{ caseId }}` and the target function is
+      `{{ functionName }}`. Return those exact values in the final JSON.
+
+      You may edit only `{{ source }}`. Preserve its behavior and do not edit
+      the test or the skill. Run `{{ testCommand }}` before and after the edit.
+      Run the complexity skill before editing and again after editing. Finish
+      only when the real score is lower and all skill targets pass.
+
+      In the final JSON, report the measured before and after values, describe
+      the refactor, and name one further useful change or say why none is needed.
+
+providers:
+  - id: openai:codex-sdk
+    label: Codex GPT-5.6 Terra
+    config:
+      model: gpt-5.6-terra
+      model_reasoning_effort: high
+      working_dir: '{{ env.COMPLEXITY_EVAL_WORKSPACES | default(".") }}/{{ caseId }}'
+      sandbox_mode: workspace-write
+      approval_policy: never
+      network_access_enabled: false
+      web_search_enabled: false
+      enable_streaming: true
+      cli_env:
+        CODEX_HOME: '{{ env.COMPLEXITY_EVAL_CODEX_HOME | default(".") }}'
+        COMPLEXITY_BIN: '{{ env.COMPLEXITY_BIN | default("complexity") }}'
+        PYTHONDONTWRITEBYTECODE: "1"
+      output_schema:
+        type: object
+        properties:
+          case_id:
+            type: string
+            minLength: 1
+          source:
+            type: string
+            minLength: 1
+          function:
+            type: string
+            minLength: 1
+          before:
+            type: object
+            properties:
+              score: { type: integer, minimum: 0 }
+              max_control_depth: { type: integer, minimum: 0 }
+              line_span: { type: integer, minimum: 1 }
+              max_condition_predicates: { type: integer, minimum: 0 }
+            required:
+              - score
+              - max_control_depth
+              - line_span
+              - max_condition_predicates
+            additionalProperties: false
+          after:
+            type: object
+            properties:
+              score: { type: integer, minimum: 0 }
+              max_control_depth: { type: integer, minimum: 0 }
+              line_span: { type: integer, minimum: 1 }
+              max_condition_predicates: { type: integer, minimum: 0 }
+            required:
+              - score
+              - max_control_depth
+              - line_span
+              - max_condition_predicates
+            additionalProperties: false
+          behavior_tests_passed:
+            type: boolean
+            const: true
+          refactor:
+            type: string
+            minLength: 1
+          further_improvement:
+            type: string
+            minLength: 1
+        required:
+          - case_id
+          - source
+          - function
+          - before
+          - after
+          - behavior_tests_passed
+          - refactor
+          - further_improvement
+        additionalProperties: false
+
+defaultTest:
+  options:
+    bustCache: true
+  assert:
+    - type: javascript
+      value: file://assertions/refactor-result.mjs
+      threshold: 1
+      metric: Verified refactor
+
+tests: file://cases.yaml
+
+evaluateOptions:
+  maxConcurrency: 1

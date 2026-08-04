@@ -1,0 +1,2 @@
+fn empty_case() {
+}

@@ -1,0 +1,31 @@
+- description: "[javascript-score] Replace repeated delivery branches"
+  vars:
+    caseId: javascript-score
+    source: subject.js
+    functionName: deliveryWindow
+    testCommand: node test.mjs
+    metricFocus: score 11
+
+- description: "[typescript-depth] Flatten nested review checks"
+  vars:
+    caseId: typescript-depth
+    source: subject.ts
+    functionName: canReview
+    testCommand: node test.mjs
+    metricFocus: control depth 4
+
+- description: "[php-predicates] Clarify one dense publish condition"
+  vars:
+    caseId: php-predicates
+    source: subject.php
+    functionName: canPublish
+    testCommand: php test.php
+    metricFocus: 5 predicates
+
+- description: "[rust-span] Shorten and flatten shipping-zone lookup"
+  vars:
+    caseId: rust-span
+    source: subject.rs
+    functionName: shipping_zone
+    testCommand: rustc --test test.rs -o .complexity-eval-test && ./.complexity-eval-test
+    metricFocus: 54 lines and score 3
