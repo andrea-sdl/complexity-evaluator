@@ -47,13 +47,15 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: 53a34619058a8a058ff81ee29c33a34d758d067b
+          ref: 4d4fadd951ffd468d0ad8eedde69ef04357a8439
           path: .release-validation
 
       - name: Overlay corrected 0.3.1 tests
         if: github.event_name == 'workflow_dispatch' && env.RELEASE_TAG == 'complexity-v0.3.1'
         shell: bash
-        run: cp .release-validation/tests/javascript.rs tests/javascript.rs
+        run: |
+          cp .release-validation/tests/javascript.rs tests/javascript.rs
+          cp .release-validation/agent/skills/complexity-cli/scripts/test_check_complexity.py agent/skills/complexity-cli/scripts/test_check_complexity.py
 
       - name: Check formatting
         run: cargo fmt --all -- --check

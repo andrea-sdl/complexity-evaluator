@@ -495,18 +495,28 @@ avoid shared-runner and parallel-test noise. The release workflow also runs
 both hook-budget tests alone, in sequence, with an optimized binary and the
 real five-second limit.
 
-The immutable `0.3.1` recovery overlays only the corrected JavaScript test file
-during validation. It first confirms that the tag still points to recorded
-commit `d1d6309`. The corrected test accepts both safe probe outcomes and uses
-the wider debug guard. The overlay is pinned to repair commit `53a3461`, so a
-later dispatch ref cannot change the test. The workflow then runs the full
-suite and the separate optimized hook-budget checks. Package jobs do not use
-the overlay and confirm the same tag commit before they build. This exception
-matches only `complexity-v0.3.1`; later manual retries use their tagged tests
-unchanged.
+The immutable `0.3.1` recovery overlays only the corrected JavaScript and Git
+conflict tests during validation. It first confirms that the tag still points
+to recorded commit `d1d6309`. The overlay is pinned to repair commit `4d4fadd`,
+so a later dispatch ref cannot change either test. The workflow then runs the
+full suite and the separate optimized hook-budget checks. Package jobs do not
+use the overlay and confirm the same tag commit before they build. This
+exception matches only `complexity-v0.3.1`; later manual retries use their
+tagged tests unchanged.
 
 Why: parser safety depends on whether the child can complete within the host's
 stack. Success and fail-closed are both safe and specified outcomes. A debug
 binary running beside other large tests does not measure the installed CLI's
 hook cost. A test-only overlay fixes validation without changing the signed
 source, skipping a gate, or changing any release artifact.
+
+## D-034: Prove the Git conflict fixture reached the intended state
+
+Decision: the hook test that needs an unmerged file supplies a local identity
+and disables commit signing for its merge command. It then checks that Git left
+exactly `source.ts` unmerged before it tests the hook response.
+
+Why: a clean Linux runner had no Git identity. Git stopped before it attempted
+the merge, but the old helper treated every nonzero merge exit as a conflict.
+The hook then had no changed file and returned a valid pass. The test setup
+must prove its precondition before it checks product behavior.
