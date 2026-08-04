@@ -521,7 +521,11 @@ Protocol:
   exceeded the release hook budget. The portable tests now accept both safe
   probe outcomes, use a wider debug guard, and keep a separate five-second
   optimized gate. The immutable `0.3.1` validation confirms tag commit
-  `d1d6309`, overlays only the corrected JavaScript test file from fixed repair
-  commit `53a3461`, and runs the full suite. Package jobs verify and build the
-  unchanged tag without the overlay. Release completion is not yet verified,
-  so this task remains in progress.
+  `d1d6309` and runs the full suite. Package jobs verify and build the unchanged
+  tag without the overlay. Recovery run `30929482127` passed all Rust and
+  optimized hook-budget gates, then found that the Git conflict fixture lacked
+  a committer identity on Linux and never created its conflict. Repair commit
+  `4d4fadd` gives that merge a local test identity, disables signing, and proves
+  that `source.ts` is unmerged. The pinned validation overlay includes both
+  corrected test files. Release completion is not yet verified, so this task
+  remains in progress.

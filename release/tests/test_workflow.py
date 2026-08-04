@@ -28,7 +28,13 @@ class ReleaseWorkflowTests(unittest.TestCase):
             workflow.count("d1d6309386e095b8daaf06a83898ecfca985d909"), 2
         )
         self.assertEqual(
-            workflow.count("53a34619058a8a058ff81ee29c33a34d758d067b"), 1
+            workflow.count("4d4fadd951ffd468d0ad8eedde69ef04357a8439"), 1
+        )
+        self.assertIn(
+            "cp .release-validation/agent/skills/complexity-cli/scripts/"
+            "test_check_complexity.py agent/skills/complexity-cli/scripts/"
+            "test_check_complexity.py",
+            normalized_workflow,
         )
         self.assertNotIn("ref: ${{ github.sha }}", workflow)
         self.assertIn(
