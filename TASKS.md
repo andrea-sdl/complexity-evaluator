@@ -504,4 +504,7 @@ Protocol:
   hook tests, 10 eval tests, and Promptfoo config validation pass. The release
   binary reports `0.3.1`. A real macOS arm64 archive passed its SHA-256 check
   and contains the binary, `README.md`, `LICENSE`, and all manifest-listed
-  agent files. The signed commit, tag, and workflow-start proof remain pending.
+  agent files. Signed commit `d1d6309` and signed annotated tag
+  `complexity-v0.3.1` are on GitHub and verified. Actions run `30927294187`
+  started for that tag and is queued. Release completion is not yet verified,
+  so this task remains in progress.
