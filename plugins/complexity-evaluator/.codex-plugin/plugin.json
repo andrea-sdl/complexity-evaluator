@@ -1,0 +1,31 @@
+{
+  "author": {
+    "name": "Andrea Grassi",
+    "url": "https://github.com/andrea-sdl"
+  },
+  "description": "Explicit skill for checking code complexity before handoff.",
+  "homepage": "https://github.com/andrea-sdl/complexity-evaluator",
+  "interface": {
+    "capabilities": [
+      "Interactive"
+    ],
+    "category": "Productivity",
+    "defaultPrompt": [
+      "Use $complexity-cli to check changed supported code."
+    ],
+    "developerName": "Andrea Grassi",
+    "displayName": "Complexity Evaluator",
+    "longDescription": "Measure changed code, name risky functions, and verify focused refactors.",
+    "shortDescription": "Check code complexity before handoff"
+  },
+  "keywords": [
+    "complexity",
+    "cognitive-complexity",
+    "code-quality"
+  ],
+  "license": "GPL-2.0-only",
+  "name": "complexity-evaluator",
+  "repository": "https://github.com/andrea-sdl/complexity-evaluator",
+  "skills": "./skills/",
+  "version": "0.4.0"
+}

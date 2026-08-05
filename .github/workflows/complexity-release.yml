@@ -150,6 +150,13 @@ jobs:
       - name: Build the native binary
         run: cargo build --release --locked --target "${{ matrix.target }}"
 
+      - name: Test both Windows plugin hook samples
+        if: runner.os == 'Windows' && env.RELEASE_TAG != 'complexity-v0.3.1'
+        env:
+          COMPLEXITY_BIN: ${{ matrix.binary }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: py -3 -m unittest release.tests.test_plugin_package.PluginPackageTests.test_each_windows_hook_sample_runs_the_packaged_checker
+
       - name: Build the release package
         shell: bash
         run: >-

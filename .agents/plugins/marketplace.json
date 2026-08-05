@@ -1,0 +1,20 @@
+{
+  "interface": {
+    "displayName": "Complexity Evaluator"
+  },
+  "name": "complexity-evaluator",
+  "plugins": [
+    {
+      "category": "Productivity",
+      "name": "complexity-evaluator",
+      "policy": {
+        "authentication": "ON_INSTALL",
+        "installation": "AVAILABLE"
+      },
+      "source": {
+        "path": "./plugins/complexity-evaluator",
+        "source": "local"
+      }
+    }
+  ]
+}

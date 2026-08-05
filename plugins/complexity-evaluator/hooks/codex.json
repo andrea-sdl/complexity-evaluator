@@ -1,0 +1,28 @@
+{
+  "description": "Check changed JS, TS, PHP, Rust, and Python before Codex stops.",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/complexity-cli/scripts/check_complexity.py\" --hook",
+            "statusMessage": "Checking code complexity",
+            "timeout": 120,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/complexity-cli/scripts/check_complexity.py\" --baseline-hook",
+            "timeout": 30,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

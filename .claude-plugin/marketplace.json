@@ -1,0 +1,19 @@
+{
+  "description": "Explicit skill for checking code complexity before handoff.",
+  "name": "complexity-evaluator",
+  "owner": {
+    "name": "Andrea Grassi"
+  },
+  "plugins": [
+    {
+      "category": "development",
+      "description": "Check code complexity before handoff.",
+      "name": "complexity-evaluator",
+      "source": "./plugins/complexity-evaluator",
+      "tags": [
+        "complexity",
+        "code-quality"
+      ]
+    }
+  ]
+}

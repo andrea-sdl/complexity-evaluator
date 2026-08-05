@@ -1,12 +1,30 @@
 # Agent support
 
 Nothing in this folder installs a skill or enables a hook. Review each file
-before you copy or merge it.
+before you copy or merge it. This `agent` tree is the hand-maintained source
+for the generated plugin at `plugins/complexity-evaluator`.
+
+For a host-native install, add the repository marketplace, then install
+`complexity-evaluator@complexity-evaluator`:
+
+```sh
+codex plugin marketplace add andrea-sdl/complexity-evaluator --ref main
+codex plugin add complexity-evaluator@complexity-evaluator
+
+claude plugin marketplace add andrea-sdl/complexity-evaluator
+claude plugin install complexity-evaluator@complexity-evaluator
+```
+
+The base plugin exposes the explicit-only skill and does not enable hooks. Its
+own README gives the local-checkout and opt-in hook steps. Keep using the
+manual copy and merge steps below when you do not want a plugin install.
 
 ## Use the bundled hook samples
 
 Keep the `agent` folder at the project root. The sample commands use the
 bundled checker at `agent/skills/complexity-cli/scripts/check_complexity.py`.
+Keep the session working directory at the project root because these commands
+use paths relative to it.
 
 Merge one sample into the matching settings file. Keep all existing settings
 and hooks.
@@ -29,11 +47,12 @@ inside that turn keeps the same baseline.
 ## Install the explicit skill
 
 To use `$complexity-cli` in Codex, copy `agent/skills/complexity-cli` to
-`$HOME/.codex/skills/complexity-cli`. For Claude Code, copy it to
+`$HOME/.agents/skills/complexity-cli`. For Claude Code, copy it to
 `$HOME/.claude/skills/complexity-cli`.
 
 The skill stays explicit-only. Its Codex metadata sets
-`allow_implicit_invocation: false`. The Claude hook samples set the
+`allow_implicit_invocation: false`. Its Claude metadata sets
+`disable-model-invocation: true`; the Claude hook samples also set the
 `user-invocable-only` override. Installing the skill does not enable a hook.
 
 The installed-skill hook examples in

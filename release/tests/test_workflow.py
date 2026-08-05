@@ -7,6 +7,21 @@ WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "complexity-release.yml"
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_windows_build_runs_both_plugin_hook_samples(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        normalized_workflow = " ".join(workflow.split())
+
+        self.assertIn(
+            "if: runner.os == 'Windows' && env.RELEASE_TAG != 'complexity-v0.3.1'",
+            workflow,
+        )
+        self.assertIn("COMPLEXITY_BIN: ${{ matrix.binary }}", workflow)
+        self.assertIn(
+            "py -3 -m unittest release.tests.test_plugin_package."
+            "PluginPackageTests.test_each_windows_hook_sample_runs_the_packaged_checker",
+            normalized_workflow,
+        )
+
     def test_existing_tag_can_be_dispatched_with_supported_python(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         normalized_workflow = " ".join(workflow.split())

@@ -8,6 +8,11 @@ AGENT_ROOT = PROJECT_ROOT / "agent"
 
 
 class AgentBundleTests(unittest.TestCase):
+    def test_bundled_hook_docs_require_the_project_root(self) -> None:
+        readme = (AGENT_ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("Keep the session working directory at the project root", readme)
+
     def test_readme_paths_exist_from_the_archive_root(self) -> None:
         readme = (AGENT_ROOT / "README.md").read_text(encoding="utf-8")
         documented_paths = (

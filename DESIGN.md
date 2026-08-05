@@ -520,3 +520,72 @@ Why: a clean Linux runner had no Git identity. Git stopped before it attempted
 the merge, but the old helper treated every nonzero merge exit as a conflict.
 The hook then had no changed file and returned a valid pass. The test setup
 must prove its precondition before it checks product behavior.
+
+## D-035: Keep manual agent setup clear until plugins exist
+
+This records the CX-023 state before CX-021. D-036 replaces only the statement
+that the repository is not installable.
+
+Decision: state that the repository is not yet an installable Codex or Claude
+Code plugin and keep `CX-021` queued. For manual setup, use the current Codex
+user skill path at `$HOME/.agents/skills` and the Claude Code user skill path
+at `$HOME/.claude/skills`. Keep the skill explicit-only in both hosts with
+`policy.allow_implicit_invocation: false` for Codex and
+`disable-model-invocation: true` for Claude Code.
+
+Add one wide README hero and three small watercolor benefit images below
+`docs/images`. Use text-free shapes, clear alt text, and small JPEG files.
+Embed their relative paths and include the fixed four-file set in each release
+archive so tagged docs stay self-contained. The images explain function-level
+findings, measured refactors, and one policy across five language families.
+They do not define scores, signal rules, or parser design.
+
+The bundled hook samples use project-relative checker paths. Their docs must
+tell users to keep the session working directory at the project root.
+Installed-skill samples use the matching home skill path instead.
+
+Why: the current release has a manually copied skill and optional hook samples,
+but no plugin or marketplace manifest. The docs must not imply a one-command
+plugin install. Host-native explicit-only metadata keeps the skill out of
+automatic model selection. Text-free images stay readable at small sizes and
+do not turn generated labels into product claims.
+
+## D-036: Generate one explicit-only plugin for both hosts
+
+Decision: `agent/` remains the only hand-maintained skill, checker, hook, and
+eval source. `release/sync_plugins.py` reads its sorted manifest and generates
+one self-contained `plugins/complexity-evaluator/` payload. The generator also
+writes the Claude Code and Codex manifests, both repository marketplaces, the
+plugin README, license, transformed hook samples, and an exact sorted plugin
+allowlist. `--check` rejects missing, changed, extra, or symlinked generated
+files.
+
+The base plugin has no `hooks/hooks.json`, so installation cannot enable a
+hook. A user who wants hooks copies one host and OS sample to that name before
+install or reload. Generated hook commands use `CLAUDE_PLUGIN_ROOT`, which both
+hosts export for plugin hooks. The skill keeps
+`disable-model-invocation: true` for Claude Code and
+`policy.allow_implicit_invocation: false` for Codex. The `complexity` binary
+stays a separate install and the checker reports `BLOCKED` when it is absent.
+
+Each release archive includes the generated plugin, both repository
+marketplaces, the manual `agent/` bundle, and the README images. The packager
+copies both source trees from their sorted allowlists and rejects symlinks or
+paths outside each tree. Plugin generation applies the same path and symlink
+checks before it reads or writes a manifest entry. Archive metadata has fixed
+timestamps, owners, and modes so unchanged inputs make the same archive bytes.
+The Windows release build runs both Windows hook samples against its native
+binary. The immutable `0.3.1` recovery skips this new step because that tagged
+source predates the plugin files.
+
+Why: one generated payload avoids two skill implementations and keeps host
+behavior aligned. Hook opt-in prevents a plugin install from running code on
+lifecycle events without a second clear action. The host policies keep the
+skill out of automatic model selection while preserving manual use.
+
+The current Codex plugin-creator preflight rejects Claude's
+`disable-model-invocation: true` field even though the Codex skill contract
+uses `agents/openai.yaml` for this policy and the real Codex marketplace
+installer accepts the same payload. Keep the required single payload and use
+the real Codex install as the ingestion proof. Do not strip the Claude field
+from a temporary validation copy, because that would validate different bytes.

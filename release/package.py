@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import gzip
 import hashlib
 import re
 import shutil
@@ -17,6 +18,17 @@ TAG_PATTERN = re.compile(
 )
 TARGET_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 AGENT_MANIFEST = "MANIFEST.txt"
+PLUGIN_PATH = PurePosixPath("plugins/complexity-evaluator")
+MARKETPLACE_PATHS = (
+    PurePosixPath(".agents/plugins/marketplace.json"),
+    PurePosixPath(".claude-plugin/marketplace.json"),
+)
+README_IMAGES = (
+    PurePosixPath("docs/images/complexity-hero.jpg"),
+    PurePosixPath("docs/images/find-risky-functions.jpg"),
+    PurePosixPath("docs/images/one-policy-many-languages.jpg"),
+    PurePosixPath("docs/images/refactor-with-proof.jpg"),
+)
 
 
 class PackageError(Exception):
@@ -64,14 +76,46 @@ def require_file(path: Path, label: str) -> None:
         raise PackageError(f"{label} does not exist or is not a file: {path}")
 
 
+def path_uses_symlink(project_root: Path, path: Path) -> bool:
+    current = project_root
+    for part in path.relative_to(project_root).parts:
+        current /= part
+        if current.is_symlink():
+            return True
+    return False
+
+
+def require_tree(path: Path, label: str, project_root: Path) -> None:
+    if not path.is_dir() or path_uses_symlink(project_root, path):
+        raise PackageError(f"{label} does not exist or is not a directory: {path}")
+
+
+def require_named_files(
+    files: list[tuple[Path, PurePosixPath]], label: str, project_root: Path
+) -> None:
+    for path, relative in files:
+        if path_uses_symlink(project_root, path):
+            raise PackageError(f"{label} path uses a symlink: {relative}")
+        require_file(path, label)
+
+
 def validate_package_inputs(
-    binary: Path, readme: Path, license_file: Path, agent_directory: Path
+    binary: Path,
+    readme: Path,
+    license_file: Path,
+    agent_directory: Path,
+    plugin_directory: Path,
+    marketplaces: list[tuple[Path, PurePosixPath]],
+    readme_images: list[tuple[Path, PurePosixPath]],
 ) -> None:
     require_file(binary, "binary")
     require_file(readme, "README")
     require_file(license_file, "LICENSE")
-    if not agent_directory.is_dir() or agent_directory.is_symlink():
-        raise PackageError(f"agent tree does not exist or is not a directory: {agent_directory}")
+    project_root = readme.parent
+    require_tree(agent_directory, "agent tree", project_root)
+    require_tree(plugin_directory, "plugin tree", project_root)
+    require_named_files(marketplaces, "marketplace", project_root)
+    require_named_files(readme_images, "README image", project_root)
 
 
 def archive_details(target: str) -> tuple[str, str, bool]:
@@ -80,39 +124,41 @@ def archive_details(target: str) -> tuple[str, str, bool]:
     return ".tar.gz", "complexity", False
 
 
-def agent_manifest_entries(agent_directory: Path) -> list[str]:
-    manifest = agent_directory / AGENT_MANIFEST
+def tree_manifest_entries(tree_directory: Path, label: str) -> list[str]:
+    manifest = tree_directory / AGENT_MANIFEST
     if manifest.is_symlink():
-        raise PackageError(f"agent manifest must not be a symlink: {manifest}")
+        raise PackageError(f"{label} manifest must not be a symlink: {manifest}")
     try:
         entries = manifest.read_text(encoding="utf-8").splitlines()
     except OSError as error:
-        raise PackageError(f"cannot read agent manifest {manifest}: {error}") from error
+        raise PackageError(f"cannot read {label} manifest {manifest}: {error}") from error
     if entries != sorted(set(entries)) or AGENT_MANIFEST not in entries:
-        raise PackageError("agent manifest must be a sorted unique list that includes itself")
+        raise PackageError(f"{label} manifest must be a sorted unique list that includes itself")
     return entries
 
 
-def agent_source(agent_directory: Path, entry: str) -> tuple[Path, PurePosixPath]:
+def tree_source(
+    tree_directory: Path, entry: str, label: str
+) -> tuple[Path, PurePosixPath]:
     relative = PurePosixPath(entry)
     if relative.is_absolute() or not entry or any(part in {".", ".."} for part in relative.parts):
-        raise PackageError(f"unsafe agent manifest path: {entry}")
-    source = agent_directory
+        raise PackageError(f"unsafe {label} manifest path: {entry}")
+    source = tree_directory
     for part in relative.parts:
         source /= part
         if source.is_symlink():
-            raise PackageError(f"agent manifest path uses a symlink: {entry}")
+            raise PackageError(f"{label} manifest path uses a symlink: {entry}")
     try:
-        source.resolve(strict=True).relative_to(agent_directory.resolve(strict=True))
+        source.resolve(strict=True).relative_to(tree_directory.resolve(strict=True))
     except (OSError, ValueError) as error:
-        raise PackageError(f"agent manifest path leaves the agent tree: {entry}") from error
-    require_file(source, "agent manifest entry")
+        raise PackageError(f"{label} manifest path leaves the tree: {entry}") from error
+    require_file(source, f"{label} manifest entry")
     return source, relative
 
 
-def copy_agent_tree(agent_directory: Path, destination: Path) -> None:
-    for entry in agent_manifest_entries(agent_directory):
-        source, relative = agent_source(agent_directory, entry)
+def copy_manifest_tree(tree_directory: Path, destination: Path, label: str) -> None:
+    for entry in tree_manifest_entries(tree_directory, label):
+        source, relative = tree_source(tree_directory, entry, label)
         target = destination.joinpath(*relative.parts)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
@@ -125,25 +171,90 @@ def populate_archive_root(
     readme: Path,
     license_file: Path,
     agent_directory: Path,
+    plugin_directory: Path,
+    marketplaces: list[tuple[Path, PurePosixPath]],
+    readme_images: list[tuple[Path, PurePosixPath]],
 ) -> None:
     archive_root.mkdir()
     shutil.copy2(binary, archive_root / binary_name)
     shutil.copy2(readme, archive_root / "README.md")
     shutil.copy2(license_file, archive_root / "LICENSE")
-    copy_agent_tree(agent_directory, archive_root / "agent")
+    for image, relative in readme_images:
+        target = archive_root.joinpath(*relative.parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(image, target)
+    copy_manifest_tree(agent_directory, archive_root / "agent", "agent")
+    copy_manifest_tree(
+        plugin_directory,
+        archive_root.joinpath(*PLUGIN_PATH.parts),
+        "plugin",
+    )
+    for marketplace, relative in marketplaces:
+        target = archive_root.joinpath(*relative.parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(marketplace, target)
+
+
+def archive_paths(archive_root: Path) -> list[Path]:
+    return [archive_root, *sorted(archive_root.rglob("*"))]
+
+
+def normalized_tar_info(info: tarfile.TarInfo, archive_base: str) -> tarfile.TarInfo:
+    info.uid = 0
+    info.gid = 0
+    info.uname = ""
+    info.gname = ""
+    info.mtime = 0
+    info.pax_headers = {}
+    binary_names = {f"{archive_base}/complexity", f"{archive_base}/complexity.exe"}
+    info.mode = 0o755 if info.isdir() or info.name in binary_names else 0o644
+    return info
+
+
+def write_tar_archive(archive: Path, archive_root: Path, archive_base: str) -> None:
+    with archive.open("wb") as archive_file:
+        with gzip.GzipFile(
+            filename="", mode="wb", fileobj=archive_file, compresslevel=9, mtime=0
+        ) as compressed:
+            with tarfile.open(
+                fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT
+            ) as release_archive:
+                for path in archive_paths(archive_root):
+                    archive_path = path.relative_to(archive_root.parent).as_posix()
+                    release_archive.add(
+                        path,
+                        arcname=archive_path,
+                        recursive=False,
+                        filter=lambda info: normalized_tar_info(info, archive_base),
+                    )
+
+
+def zip_info(path: Path, archive_root: Path, archive_base: str) -> zipfile.ZipInfo:
+    archive_path = path.relative_to(archive_root.parent).as_posix()
+    if path.is_dir():
+        archive_path += "/"
+    info = zipfile.ZipInfo(archive_path, date_time=(1980, 1, 1, 0, 0, 0))
+    info.create_system = 3
+    info.compress_type = zipfile.ZIP_STORED if path.is_dir() else zipfile.ZIP_DEFLATED
+    binary_names = {f"{archive_base}/complexity", f"{archive_base}/complexity.exe"}
+    mode = 0o755 if path.is_dir() or archive_path in binary_names else 0o644
+    file_type = 0o040000 if path.is_dir() else 0o100000
+    info.external_attr = (file_type | mode) << 16
+    return info
+
+
+def write_zip_archive(archive: Path, archive_root: Path, archive_base: str) -> None:
+    with zipfile.ZipFile(archive, "w") as release_archive:
+        for path in archive_paths(archive_root):
+            contents = b"" if path.is_dir() else path.read_bytes()
+            release_archive.writestr(zip_info(path, archive_root, archive_base), contents)
 
 
 def write_archive(archive: Path, archive_root: Path, archive_base: str, is_windows: bool) -> None:
     if is_windows:
-        with zipfile.ZipFile(
-            archive, "w", compression=zipfile.ZIP_DEFLATED
-        ) as release_archive:
-            for path in sorted(archive_root.rglob("*")):
-                archive_path = path.relative_to(archive_root.parent).as_posix()
-                release_archive.write(path, archive_path)
+        write_zip_archive(archive, archive_root, archive_base)
         return
-    with tarfile.open(archive, "w:gz") as release_archive:
-        release_archive.add(archive_root, arcname=archive_base)
+    write_tar_archive(archive, archive_root, archive_base)
 
 
 def write_checksum(archive: Path) -> Path:
@@ -151,6 +262,20 @@ def write_checksum(archive: Path) -> Path:
     with checksum.open("w", encoding="utf-8", newline="\n") as checksum_file:
         checksum_file.write(f"{sha256_file(archive)}  {archive.name}\n")
     return checksum
+
+
+def marketplace_files(project_root: Path) -> list[tuple[Path, PurePosixPath]]:
+    return [
+        (project_root.joinpath(*relative.parts), relative)
+        for relative in MARKETPLACE_PATHS
+    ]
+
+
+def readme_image_files(project_root: Path) -> list[tuple[Path, PurePosixPath]]:
+    return [
+        (project_root.joinpath(*relative.parts), relative)
+        for relative in README_IMAGES
+    ]
 
 
 def package_release(
@@ -167,7 +292,18 @@ def package_release(
     readme = project_root / "README.md"
     license_file = project_root / "LICENSE"
     agent_directory = project_root / "agent"
-    validate_package_inputs(binary, readme, license_file, agent_directory)
+    plugin_directory = project_root.joinpath(*PLUGIN_PATH.parts)
+    marketplaces = marketplace_files(project_root)
+    readme_images = readme_image_files(project_root)
+    validate_package_inputs(
+        binary,
+        readme,
+        license_file,
+        agent_directory,
+        plugin_directory,
+        marketplaces,
+        readme_images,
+    )
 
     archive_base = f"complexity-{version}-{target}"
     archive_suffix, binary_name, is_windows = archive_details(target)
@@ -177,7 +313,15 @@ def package_release(
     with tempfile.TemporaryDirectory() as temporary_directory:
         archive_root = Path(temporary_directory) / archive_base
         populate_archive_root(
-            archive_root, binary, binary_name, readme, license_file, agent_directory
+            archive_root,
+            binary,
+            binary_name,
+            readme,
+            license_file,
+            agent_directory,
+            plugin_directory,
+            marketplaces,
+            readme_images,
         )
         write_archive(archive, archive_root, archive_base, is_windows)
 
