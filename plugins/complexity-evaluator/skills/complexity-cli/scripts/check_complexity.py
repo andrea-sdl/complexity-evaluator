@@ -42,6 +42,8 @@ HARD_LIMITS = {
     "max_condition_predicates": 6,
 }
 
+MAX_COGNITIVE_LOAD = 2
+
 MAX_FINDINGS = 20
 MAX_FILES = 10
 STATE_VERSION = 1
@@ -363,6 +365,8 @@ def run_complexity(binary: str, cwd: Path, paths: list[str]) -> tuple[int, dict[
         "json",
         "--max-complexity",
         str(HARD_LIMITS["score"]),
+        "--max-cognitive-load",
+        str(MAX_COGNITIVE_LOAD),
         *safe_paths(paths),
     ]
 
@@ -416,7 +420,9 @@ def evaluate(report: dict[str, Any], cli_exit: int) -> tuple[str, int, str]:
         seen_functions,
         seen_native_violations,
     )
-    validate_cli_exit(cli_exit, native_violations)
+    cognitive_findings = readability_findings(report)
+    findings.extend(cognitive_findings)
+    validate_cli_exit(cli_exit, native_violations, cognitive_findings)
     return format_evaluation(
         file_count,
         function_count,
@@ -433,6 +439,11 @@ def validate_report_metadata(report: dict[str, Any], cli_exit: int) -> None:
         raise RuntimeError("complexity did not use the core-v1 score profile")
     if report.get("max_complexity") != HARD_LIMITS["score"]:
         raise RuntimeError("complexity used an unexpected score limit")
+    readability = report.get("readability")
+    if not isinstance(readability, dict):
+        raise RuntimeError("complexity did not return cognitive-load findings")
+    if readability.get("max_cognitive_load") != MAX_COGNITIVE_LOAD:
+        raise RuntimeError("complexity used an unexpected cognitive-load limit")
     if report.get("status") != "complete" or cli_exit == 2:
         raise RuntimeError("complexity analysis is incomplete")
 
@@ -590,8 +601,45 @@ def validate_summary_counts(
         raise RuntimeError("summary.violations does not match the function records")
 
 
-def validate_cli_exit(cli_exit: int, native_violations: int) -> None:
-    expected_exit = 1 if native_violations > 0 else 0
+def readability_findings(report: dict[str, Any]) -> list[tuple[str, str]]:
+    readability = report["readability"]
+    violations = readability.get("violations")
+    if not isinstance(violations, list):
+        raise RuntimeError("complexity schema v2 has invalid cognitive-load findings")
+
+    findings: list[tuple[str, str]] = []
+    for violation in violations:
+        if not isinstance(violation, dict):
+            raise RuntimeError("complexity schema v2 has an invalid cognitive-load finding")
+        rule = violation.get("rule")
+        path = violation.get("path")
+        function_id = violation.get("function_id")
+        load = violation.get("load")
+        location = violation.get("location")
+        line = location.get("line") if isinstance(location, dict) else None
+        column = location.get("column") if isinstance(location, dict) else None
+        if (
+            rule != "cognitive_load.inline_conditional_return"
+            or not isinstance(path, str)
+            or not isinstance(function_id, str)
+            or required_int(line, "readability.violations.location.line") == 0
+            or required_int(column, "readability.violations.location.column") == 0
+            or required_int(load, "readability.violations.load") <= MAX_COGNITIVE_LOAD
+        ):
+            raise RuntimeError("complexity schema v2 has an invalid cognitive-load finding")
+        findings.append(
+            (
+                "REVISE",
+                f"{function_id} {rule} load={load}>{MAX_COGNITIVE_LOAD}",
+            )
+        )
+    return findings
+
+
+def validate_cli_exit(
+    cli_exit: int, native_violations: int, findings: list[tuple[str, str]]
+) -> None:
+    expected_exit = 1 if native_violations > 0 or findings else 0
     if cli_exit != expected_exit:
         raise RuntimeError("complexity exit status and schema v2 report disagree")
 

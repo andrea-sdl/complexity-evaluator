@@ -589,3 +589,21 @@ uses `agents/openai.yaml` for this policy and the real Codex marketplace
 installer accepts the same payload. Keep the required single payload and use
 the real Codex install as the ingestion proof. Do not strip the Claude field
 from a temporary validation copy, because that would validate different bytes.
+
+## D-037: Gate one dense inline return without changing core-v1
+
+Decision: add an opt-in `--max-cognitive-load N` gate. It reports only
+`cognitive_load.inline_conditional_return`, a syntax rule with three points:
+an inline conditional return, a Boolean operator in its test, and an explicit
+cast in a direct branch. A result above the user limit exits 1. The normal
+`--max-complexity` contract remains score-only.
+
+Why: the score and signals correctly report structural facts, but they do not
+enforce a dense one-line return. This small rule catches that case without
+guessing whether names are clear or whether a function call is easy to read.
+It uses only parser facts and applies the same components to each language.
+Python has no explicit cast syntax, so it can score only the first two points.
+
+The rule takes inspiration from the Boolean-condition and early-return examples
+in [zakirullin/cognitive-load](https://github.com/zakirullin/cognitive-load).
+This project defines and implements its own rule; it does not copy that code.

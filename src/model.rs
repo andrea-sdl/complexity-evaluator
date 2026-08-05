@@ -9,6 +9,8 @@ pub struct Report {
     pub status: RunStatus,
     pub files: Vec<FileResult>,
     pub summary: Summary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readability: Option<ReadabilityReport>,
 }
 
 #[derive(Debug, Serialize)]
@@ -57,6 +59,23 @@ pub struct FunctionResult {
     pub over_limit: bool,
     pub contributions: Vec<Contribution>,
     pub signals: FunctionSignals,
+    #[serde(skip)]
+    pub cognitive_load_findings: Vec<CognitiveLoadFinding>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReadabilityReport {
+    pub max_cognitive_load: u32,
+    pub violations: Vec<CognitiveLoadFinding>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CognitiveLoadFinding {
+    pub rule: &'static str,
+    pub path: String,
+    pub function_id: String,
+    pub location: Position,
+    pub load: u32,
 }
 
 #[derive(Debug, Serialize)]

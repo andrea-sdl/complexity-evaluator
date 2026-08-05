@@ -14,11 +14,14 @@ use cap_std::{
     fs::{Dir, DirEntry},
 };
 use ignore::{WalkBuilder, gitignore::GitignoreBuilder};
-use model::{FileResult, FileStatus, Report, RunStatus, Summary, Tool};
+use model::{
+    CognitiveLoadFinding, FileResult, FileStatus, ReadabilityReport, Report, RunStatus, Summary,
+    Tool,
+};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const USAGE: &str = "Usage: complexity [--language javascript|typescript|php|rust|python]... \
-[--format text|json] [--max-complexity N] [--stdin-filename PATH] <path...|->";
+[--format text|json] [--max-complexity N] [--max-cognitive-load N] [--stdin-filename PATH] <path...|->";
 
 const DEFAULT_MAX_COMPLEXITY: u32 = 15;
 const PROFILE: &str = "core-v1";
@@ -40,6 +43,7 @@ enum OutputFormat {
 struct Options {
     format: OutputFormat,
     max_complexity: u32,
+    max_cognitive_load: Option<u32>,
     languages: BTreeSet<LanguageFilter>,
     stdin_filename: Option<String>,
     paths: Vec<PathBuf>,
@@ -49,6 +53,7 @@ struct OptionParser {
     options: Options,
     format_seen: bool,
     max_complexity_seen: bool,
+    max_cognitive_load_seen: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -107,12 +112,14 @@ impl OptionParser {
             options: Options {
                 format: OutputFormat::Text,
                 max_complexity: DEFAULT_MAX_COMPLEXITY,
+                max_cognitive_load: None,
                 languages: BTreeSet::new(),
                 stdin_filename: None,
                 paths: Vec::new(),
             },
             format_seen: false,
             max_complexity_seen: false,
+            max_cognitive_load_seen: false,
         }
     }
 
@@ -127,6 +134,7 @@ impl OptionParser {
             }
             "--format" => self.set_format(arguments)?,
             "--max-complexity" => self.set_max_complexity(arguments)?,
+            "--max-cognitive-load" => self.set_max_cognitive_load(arguments)?,
             "--stdin-filename" => self.set_stdin_filename(arguments)?,
             "-" => self.options.paths.push(PathBuf::from("-")),
             value if value.starts_with('-') => {
@@ -158,6 +166,19 @@ impl OptionParser {
 
         self.max_complexity_seen = true;
         self.options.max_complexity = parse_max_complexity(arguments)?;
+        Ok(())
+    }
+
+    fn set_max_cognitive_load(
+        &mut self,
+        arguments: &mut impl Iterator<Item = OsString>,
+    ) -> Result<(), String> {
+        if self.max_cognitive_load_seen {
+            return Err("--max-cognitive-load cannot be repeated".to_string());
+        }
+
+        self.max_cognitive_load_seen = true;
+        self.options.max_cognitive_load = Some(parse_max_cognitive_load(arguments)?);
         Ok(())
     }
 
@@ -226,6 +247,12 @@ fn parse_max_complexity(arguments: &mut impl Iterator<Item = OsString>) -> Resul
     option_value(arguments, "--max-complexity", "a non-negative integer")?
         .parse()
         .map_err(|_| "--max-complexity requires a non-negative integer".to_string())
+}
+
+fn parse_max_cognitive_load(arguments: &mut impl Iterator<Item = OsString>) -> Result<u32, String> {
+    option_value(arguments, "--max-cognitive-load", "a non-negative integer")?
+        .parse()
+        .map_err(|_| "--max-cognitive-load requires a non-negative integer".to_string())
 }
 
 fn option_value(
@@ -306,7 +333,12 @@ fn run_analysis(options: Options, cwd: &Path) -> CommandOutput {
             )
         })
         .collect();
-    finish_report(options.format, options.max_complexity, files)
+    finish_report(
+        options.format,
+        options.max_complexity,
+        options.max_cognitive_load,
+        files,
+    )
 }
 
 fn run_stdin(options: Options) -> CommandOutput {
@@ -337,15 +369,21 @@ fn run_stdin(options: Options) -> CommandOutput {
         Err(error) => failed_file(filename, language, error.to_string()),
     };
 
-    finish_report(options.format, options.max_complexity, vec![file])
+    finish_report(
+        options.format,
+        options.max_complexity,
+        options.max_cognitive_load,
+        vec![file],
+    )
 }
 
 fn finish_report(
     format: OutputFormat,
     max_complexity: u32,
+    max_cognitive_load: Option<u32>,
     files: Vec<FileResult>,
 ) -> CommandOutput {
-    let report = build_report(max_complexity, files);
+    let report = build_report(max_complexity, max_cognitive_load, files);
     let exit_code = report_exit_code(&report);
     let stdout = match format {
         OutputFormat::Text => format_text(&report),
@@ -770,12 +808,21 @@ fn failed_file(path: String, language: String, message: String) -> FileResult {
     }
 }
 
-fn build_report(max_complexity: u32, files: Vec<FileResult>) -> Report {
+fn build_report(
+    max_complexity: u32,
+    max_cognitive_load: Option<u32>,
+    files: Vec<FileResult>,
+) -> Report {
     let mut summary = empty_summary(files.len());
 
     for file in &files {
         update_summary(&mut summary, file);
     }
+
+    let readability = max_cognitive_load.map(|limit| ReadabilityReport {
+        max_cognitive_load: limit,
+        violations: cognitive_load_violations(&files, limit),
+    });
 
     Report {
         schema_version: 2,
@@ -792,7 +839,33 @@ fn build_report(max_complexity: u32, files: Vec<FileResult>) -> Report {
         },
         summary,
         files,
+        readability,
     }
+}
+
+fn cognitive_load_violations(files: &[FileResult], limit: u32) -> Vec<CognitiveLoadFinding> {
+    let mut violations = files
+        .iter()
+        .flat_map(|file| &file.functions)
+        .flat_map(|function| &function.cognitive_load_findings)
+        .filter(|finding| finding.load > limit)
+        .cloned()
+        .collect::<Vec<_>>();
+    violations.sort_by(|left, right| {
+        (
+            &left.path,
+            left.location.line,
+            left.location.column,
+            left.rule,
+        )
+            .cmp(&(
+                &right.path,
+                right.location.line,
+                right.location.column,
+                right.rule,
+            ))
+    });
+    violations
 }
 
 fn empty_summary(file_count: usize) -> Summary {
@@ -850,7 +923,12 @@ fn report_exit_code(report: &Report) -> u8 {
     if report.status == RunStatus::Incomplete {
         return 2;
     }
-    if report.summary.violations > 0 {
+    if report.summary.violations > 0
+        || report
+            .readability
+            .as_ref()
+            .is_some_and(|readability| !readability.violations.is_empty())
+    {
         return 1;
     }
     0
@@ -866,6 +944,19 @@ fn format_text(report: &Report) -> String {
     let mut output = String::new();
     for file in &report.files {
         append_file_text(&mut output, file);
+    }
+    if let Some(readability) = &report.readability {
+        for violation in &readability.violations {
+            output.push_str(&format!(
+                "REVISE {}:{}:{} rule={} load={}>{}\n",
+                text_safe(&violation.path),
+                violation.location.line,
+                violation.location.column,
+                violation.rule,
+                violation.load,
+                readability.max_cognitive_load,
+            ));
+        }
     }
     output.push_str(&format!(
         "Summary: files={} functions={} violations={} errors={} max_score={} \
@@ -884,6 +975,13 @@ max_condition_operators={} max_condition_predicates={} max_boolean_depth={}\n",
         report.summary.max_condition_predicates,
         report.summary.max_boolean_depth,
     ));
+    if let Some(readability) = &report.readability {
+        output.push_str(&format!(
+            "Readability: max_cognitive_load={} violations={}\n",
+            readability.max_cognitive_load,
+            readability.violations.len(),
+        ));
+    }
     output
 }
 

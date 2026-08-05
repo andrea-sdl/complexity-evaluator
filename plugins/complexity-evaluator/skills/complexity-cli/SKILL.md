@@ -50,6 +50,11 @@ The checker exits `0` for `PASS`, `1` for `REVISE` or `FAIL`, and `2` for
 other values are this skill's small-code policy, not Sonar compatibility
 claims.
 
+The checker also enables `--max-cognitive-load 2`. It returns `REVISE` for an
+inline conditional return that combines a Boolean test and an explicit cast.
+Split it into a guard return and a clear final return, then run the checker
+again. This rule uses syntax only. It does not judge variable names or intent.
+
 Checker exit `1` is an expected result for `REVISE` and `FAIL`. Use its named
 findings; do not debug that exit as a tool failure.
 
@@ -60,6 +65,8 @@ report evidence. Do not gate on them without a project-specific rule.
 
 - For excess control depth, use guard clauses when they keep the same behavior.
 - For dense predicates, use named Boolean values that express the domain rule.
+- For a flagged inline conditional return, use a guard return or compute the
+  value before the return when that keeps the behavior clear.
 - For excess line span, extract a cohesive domain operation with one clear job.
 - Do not split code into shallow helpers only to lower a score. Keep related
   work together and change only the function named by the report.

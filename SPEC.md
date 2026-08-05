@@ -682,7 +682,7 @@ hook samples against the native binary before it creates the archive.
 
 ## Out of scope
 
-- Signal thresholds or exit effects
+- Automatic enforcement of raw score signals
 - Core CLI config files, baselines, Git-diff mode, SARIF, or editor services
 - Parallel analysis
 - Inheritance, import, dependency, or call graphs
@@ -691,3 +691,26 @@ hook samples against the native binary before it creates the archive.
 - A stable public Rust library API
 - Package signing, native installers, package-manager publication, or
   automatic hook installation
+
+## Optional cognitive-load gate
+
+`--max-cognitive-load N` enables one separate readability rule. Without the
+option, the CLI keeps the `core-v1` score, schema v2 JSON, text output, and
+exit result unchanged.
+
+The rule id is `cognitive_load.inline_conditional_return`. A direct conditional
+return has load 1. Add 1 when its test contains a Boolean operator and add 1
+when either direct branch uses an explicit cast. The maximum load is 3. A
+finding has `load > N`. The finding location is the start of the conditional
+return expression.
+
+JavaScript and TypeScript use conditional expressions and `as` or angle-bracket
+assertions. PHP uses conditional expressions and cast expressions. Rust uses
+`if` expressions with an `else` branch and type casts. Python has conditional
+expressions but no explicit cast syntax, so that component is always 0. The
+rule does not inspect names, calls, types, comments, or intent.
+
+When enabled, JSON adds a final `readability` object with the configured limit
+and ordered findings. Text adds one `REVISE` line per finding and a readability
+summary. A complete report exits 1 for a score violation or readability finding.
+Exit 2 remains higher priority.
