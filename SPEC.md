@@ -1,6 +1,6 @@
 # `complexity` specification
 
-Version: `0.3.1`
+Version: `0.4.0`
 
 Schema: `2`
 
@@ -452,7 +452,7 @@ files
 summary
 ```
 
-`tool` is `{"name":"complexity","version":"0.3.1"}`.
+`tool` is `{"name":"complexity","version":"0.4.0"}`.
 
 Each file uses:
 
@@ -609,7 +609,14 @@ contains one directory with the same base name and these paths:
 complexity or complexity.exe
 README.md
 LICENSE
+docs/images/complexity-hero.jpg
+docs/images/find-risky-functions.jpg
+docs/images/one-policy-many-languages.jpg
+docs/images/refactor-with-proof.jpg
 agent/
+.agents/plugins/marketplace.json
+.claude-plugin/marketplace.json
+plugins/complexity-evaluator/
 ```
 
 The tracked `agent` tree contains:
@@ -628,19 +635,50 @@ eval/
 The skill is explicit-only. Packaging or copying it must not enable a hook.
 Hook files are merge samples. POSIX samples use `python3`; Windows samples use
 `py -3`. Bundled samples call the checker in the project-local `agent` tree.
-Installed-skill examples call the matching home skill path. The eval uses the
-project-local pinned Promptfoo package and the four manual Codex refactor cases
-defined above. `COMPLEXITY_BIN` must name the supplied `complexity` binary.
+Their session working directory must stay at the project root. Installed-skill
+examples call the matching home skill path. The eval uses the project-local
+pinned Promptfoo package and the four manual Codex refactor cases defined
+above. `COMPLEXITY_BIN` must name the supplied `complexity` binary.
 The runner disables Promptfoo telemetry and update checks, bypasses its result
 cache, and does not share results.
 
-`agent/MANIFEST.txt` is a sorted, unique list of archive paths and includes
-itself. Packaging copies only regular files named there. Each resolved source
-must stay below the real `agent` directory, and no path component can be a
-symlink. An absent, unsafe, duplicate, or unsorted entry fails packaging.
+The repository has one generated, installable payload at
+`plugins/complexity-evaluator/`. Its Claude Code and Codex manifests use the
+package version, GPL-2.0-only license, canonical repository, and real author
+metadata. The repository marketplaces point to that relative path. The Claude
+marketplace does not repeat the plugin version. The Codex entry uses
+`AVAILABLE`, `ON_INSTALL`, and the `Productivity` category.
+
+`agent/` is the canonical source. `release/sync_plugins.py` copies only its
+manifest-listed skill and eval files, transforms the four hook samples to use
+`CLAUDE_PLUGIN_ROOT`, and writes the plugin manifests, README, license, and
+sorted `MANIFEST.txt`. `--check` fails on drift, missing or extra files, or a
+symlinked generated path.
+
+The base plugin has no `hooks/hooks.json`. Installing it exposes only the
+explicit skill. Claude Code reads `disable-model-invocation: true`; Codex reads
+`policy.allow_implicit_invocation: false`. A user enables a hook only by
+copying one matching sample to `hooks/hooks.json` before install or reload.
+The `complexity` binary is installed separately. Its absence reports
+`BLOCKED`.
+
+Manual installs remain supported. Codex users copy the skill to
+`$HOME/.agents/skills/complexity-cli`; Claude Code users copy it to
+`$HOME/.claude/skills/complexity-cli`. Copying either form does not enable a
+hook.
+
+`agent/MANIFEST.txt` and `plugins/complexity-evaluator/MANIFEST.txt` are
+sorted, unique archive allowlists that include themselves. Packaging copies
+only regular files named there. Each resolved source must stay below its real
+tree, and no path component can be a symlink. Marketplace files and README
+images also reject symlinked paths. An absent, unsafe, duplicate, or unsorted
+entry fails packaging.
 
 Each archive has a separate SHA-256 file. The release is created only after
-validation and all five package jobs pass.
+validation and all five package jobs pass. Fixed timestamps, owners, and modes
+make archive bytes independent of checkout file times. For releases after
+`0.3.1`, the Windows package job executes the Codex and Claude Code Windows
+hook samples against the native binary before it creates the archive.
 
 ## Out of scope
 
@@ -651,5 +689,5 @@ validation and all five package jobs pass.
 - Duplication, comment, naming, framework, or architecture judgments
 - Compatibility aliases for the old commands or JSON schema v1
 - A stable public Rust library API
-- Package signing, installers, package-manager publication, or automatic skill
-  and hook installation
+- Package signing, native installers, package-manager publication, or
+  automatic hook installation

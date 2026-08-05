@@ -4,7 +4,7 @@
 JavaScript, TypeScript, PHP, Rust, and Python. It scans one file, mixed files,
 or directories and gives deterministic text or JSON reports.
 
-Version: `0.3.1`
+Version: `0.4.0`
 
 JSON schema: `2`
 
@@ -13,6 +13,25 @@ Score profile: `core-v1`
 The report also gives syntax facts for control depth, condition shape, function
 line span, and functions per file. These signals do not change scores or exit
 codes.
+
+![Complex code passes through an evaluator and becomes a small set of clear paths for human review.][hero-image]
+
+## Why it helps
+
+`complexity` gives an AI a fast, deterministic check before it asks a human to
+review code. It points to the function and the measured reason, so the AI can
+make a small refactor, run the tests, and prove that the result is easier to
+read.
+
+| Find risky functions | Refactor with proof | Use one policy across languages |
+| --- | --- | --- |
+| ![A lens isolates a deeply nested path in one function.][risk-image] | ![A tangled path becomes three clear paths while a test stays green.][refactor-image] | ![Five source inputs produce one consistent set of measures.][languages-image] |
+| See the exact function, score, depth, span, and condition shape. | Measure before and after the edit, then keep the behavior test green. | Apply the same limits to JavaScript, TypeScript, PHP, Rust, and Python. |
+
+[hero-image]: docs/images/complexity-hero.jpg
+[risk-image]: docs/images/find-risky-functions.jpg
+[refactor-image]: docs/images/refactor-with-proof.jpg
+[languages-image]: docs/images/one-policy-many-languages.jpg
 
 ## Build
 
@@ -28,14 +47,16 @@ cargo install --path .
 
 ## Releases
 
-Push a tag such as `complexity-v0.3.1` to build release archives for Linux
+Push a tag such as `complexity-v0.4.0` to build release archives for Linux
 x64 and arm64, macOS Intel and arm64, and Windows x64. The tag version must
 match `Cargo.toml`.
 
-Each archive contains the binary, this README, the GPL-2.0 license, and the
-`agent` folder. A separate `.sha256` file lets you check the archive before
-use. The packager copies only the files listed in `agent/MANIFEST.txt`; local
-cache or output files cannot enter a release by accident.
+Each archive contains the binary, this README and its four images, the GPL-2.0
+license, the manual `agent` bundle, and the installable plugin with both
+marketplace files. A separate `.sha256` file lets you check the archive before
+use. The packager copies only the fixed README image list and the two sorted
+manifest allowlists; local cache or output files cannot enter a release by
+accident.
 
 The release flow lives in this repository. It validates the project once,
 builds each native target with the locked dependency graph, and creates the
@@ -45,10 +66,57 @@ The tag push is the normal automated path. If a workflow-only fault stops that
 run, dispatch the same workflow with the existing tag after the fix. The retry
 checks out the unchanged tag and runs the same validation and package jobs.
 
-## Agent support
+## Codex and Claude Code
 
-`agent/skills/complexity-cli` is the explicit-only Codex and Claude skill.
-It keeps these policy levels:
+First put the `complexity` binary on `PATH`, or set `COMPLEXITY_BIN`. The
+plugin supplies the skill and eval files, not the native binary.
+
+This repository is the marketplace container. The installable plugin is
+`plugins/complexity-evaluator/`. Codex reads `.agents/plugins/marketplace.json`;
+Claude Code reads `.claude-plugin/marketplace.json`.
+
+Layout references: [OpenAI plugin packaging](https://developers.openai.com/plugins/build/plugins)
+and [Claude Code marketplaces](https://code.claude.com/docs/en/plugin-marketplaces).
+
+Install from GitHub in Codex:
+
+```sh
+codex plugin marketplace add andrea-sdl/complexity-evaluator --ref main
+codex plugin add complexity-evaluator@complexity-evaluator
+```
+
+Start a new Codex session, then invoke `$complexity-cli`.
+
+Install from GitHub in Claude Code:
+
+```sh
+claude plugin marketplace add andrea-sdl/complexity-evaluator
+claude plugin install complexity-evaluator@complexity-evaluator
+```
+
+Run `/reload-plugins` or start a new Claude Code session, then invoke
+`/complexity-evaluator:complexity-cli`.
+
+For a local checkout, replace `andrea-sdl/complexity-evaluator` with `.` in
+the marketplace command. The generated payload lives at
+[`plugins/complexity-evaluator`](plugins/complexity-evaluator), and its README
+has the opt-in hook steps. The base plugin does not enable hooks.
+
+You can also install the same explicit-only skill without a plugin. Run these
+commands from the repository or release archive root:
+
+```sh
+# Codex
+mkdir -p "$HOME/.agents/skills/complexity-cli"
+cp -R agent/skills/complexity-cli/. "$HOME/.agents/skills/complexity-cli/"
+
+# Claude Code
+mkdir -p "$HOME/.claude/skills/complexity-cli"
+cp -R agent/skills/complexity-cli/. "$HOME/.claude/skills/complexity-cli/"
+```
+
+Invoke `$complexity-cli` in Codex or `/complexity-cli` in Claude Code. The
+skill does not start by itself. It keeps these policy levels:
 
 | Metric | Target | Hard limit |
 | --- | ---: | ---: |
@@ -60,7 +128,8 @@ It keeps these policy levels:
 `agent/hooks/` has optional Codex and Claude merge samples for POSIX and
 Windows. They check supported files changed during the task and stay silent
 for unsupported-only changes. Copying the skill does not enable a hook. See
-[`agent/README.md`](agent/README.md) for install and merge steps.
+[`agent/README.md`](agent/README.md) for more install details and hook merge
+steps.
 
 Run the four Promptfoo refactor cases manually against a built binary. The
 cases ask Codex to improve one JavaScript, TypeScript, PHP, or Rust function:

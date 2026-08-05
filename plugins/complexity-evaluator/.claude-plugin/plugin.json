@@ -1,0 +1,17 @@
+{
+  "author": {
+    "name": "Andrea Grassi",
+    "url": "https://github.com/andrea-sdl"
+  },
+  "description": "Explicit skill for checking code complexity before handoff.",
+  "homepage": "https://github.com/andrea-sdl/complexity-evaluator",
+  "keywords": [
+    "complexity",
+    "cognitive-complexity",
+    "code-quality"
+  ],
+  "license": "GPL-2.0-only",
+  "name": "complexity-evaluator",
+  "repository": "https://github.com/andrea-sdl/complexity-evaluator",
+  "version": "0.4.0"
+}

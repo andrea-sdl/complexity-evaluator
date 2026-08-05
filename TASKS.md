@@ -444,8 +444,8 @@ Protocol:
 
 ## CX-021: Package the skill and hooks for Claude Code and Codex
 
-- Status: ready
-- Owner: unassigned
+- Status: in-progress
+- Owner: root
 - Depends on: CX-020
 - Scope: add installable Claude Code and Codex plugin packages. Generate both
   from `agent/skills/complexity-cli/**`, `agent/hooks/*`, and the current manual
@@ -485,11 +485,53 @@ Protocol:
   enable and test each hook sample separately; run the short Promptfoo eval,
   skill and release tests, Rust gates, self-analysis, checksum checks, and an
   independent security and correctness review.
-- Evidence: queued.
+- Evidence: the generated `0.4.0` payload and both repository marketplaces
+  pass exact drift, allowlist, source-containment, symlink, and archive
+  contracts. `claude plugin validate` passes for the payload and marketplace.
+  Clean local Codex and Claude Code marketplace installs each report version
+  `0.4.0`; their cached payloads match the source bytes, expose one skill, and
+  enable no hook. The current Codex CLI accepts the marketplace and plugin, but
+  its separate plugin-creator preflight rejects Claude's required
+  `disable-model-invocation` field; D-036 records why the real shared-payload
+  install is the Codex ingestion proof. Both POSIX hook samples run the packed
+  checker against mixed changes. The Windows commands have exact contract
+  tests. The Windows release build is configured and contract-tested to run
+  both against its native binary for releases after the immutable `0.3.1`
+  source; that hosted step has not run yet.
+
+  Formatting, strict Clippy, all 116 Rust tests, the locked release build, 31
+  release tests with one Windows-only skip, 19 skill tests, 10 eval tests, and
+  Promptfoo config validation pass. Project-owned source stays at or below
+  score 7. A real macOS arm64 archive reports `complexity 0.4.0`, passes its
+  SHA-256 check, and includes the plugin, both marketplaces, manual agent
+  bundle, and four watercolor images. Tar and zip outputs stay byte-identical
+  when only source timestamps change. An initial review found one plugin
+  manifest traversal fault and unstable archive metadata; focused red-green
+  fixes closed both. Final security and correctness reviews found no remaining
+  issue.
+
+  Canonical delivery validation on 2026-08-05 copied the generated payload,
+  marketplaces, release flow, documentation, and four watercolor images into
+  `andrea-sdl/complexity-evaluator` without deleting the target's existing
+  work. The target matched the verified source after excluding local settings
+  and build caches. It passed formatting, strict Clippy, all 116 Rust tests,
+  the locked release build, 31 release tests with one Windows-only skip, 19
+  skill tests, 10 static eval tests, Promptfoo config validation, plugin drift
+  checks, and a new arm64 archive checksum check. Claude Code validates both
+  manifests and installs the local plugin with one skill and no hooks. Codex
+  installs the local plugin as version `0.4.0` with `AVAILABLE` and
+  `ON_INSTALL` policy.
+
+  Remaining: run one explicit model invocation through each installed host and
+  the short live Promptfoo eval after the owner explicitly approves sending
+  the skill text and public fixture source to those services. A 2026-08-05
+  read-only Codex attempt was rejected by the execution safety control because
+  it would send `src/main.rs` to an external service. Keep this task in progress
+  until that approval and evidence exist.
 
 ## CX-022: Publish test release 0.3.1
 
-- Status: in progress
+- Status: done
 - Owner: root
 - Depends on: CX-020
 - Scope: make the smallest version-only update from `0.3.0` to `0.3.1`, run
@@ -527,5 +569,35 @@ Protocol:
   a committer identity on Linux and never created its conflict. Repair commit
   `4d4fadd` gives that merge a local test identity, disables signing, and proves
   that `source.ts` is unmerged. The pinned validation overlay includes both
-  corrected test files. Release completion is not yet verified, so this task
-  remains in progress.
+  corrected test files. Recovery run `30930233848` passed the full validation,
+  all five native package builds, package checksum checks, and GitHub release
+  creation. GitHub published five archives and their five SHA-256 files at
+  `complexity-v0.3.1`. The signed tag still points to the unchanged `d1d6309`
+  release commit.
+
+## CX-023: Clarify agent setup and add README visuals
+
+- Status: done
+- Owner: root
+- Depends on: CX-020
+- Scope: state the current manual Codex and Claude Code install paths without
+  claiming that plugin packaging exists; enforce the explicit-only skill
+  contract in both hosts; and add one hero plus three small README images.
+  Keep `CX-021` ready and do not add plugin manifests in this task.
+- Success: the root and agent docs name the current host paths and the plugin
+  gap; Codex and Claude Code metadata both block implicit invocation; focused
+  tests fail before and pass after the metadata and path fixes; the four image
+  files are small, valid, text-free JPEGs with useful alt text; release
+  archives contain the images used by their README; bundled hook docs name the
+  project-root requirement; and all project gates pass.
+- Evidence: current OpenAI and Claude Code docs confirm the manual skill paths,
+  explicit-only metadata, and plugin-manifest gap. Focused tests first failed
+  for the missing Claude metadata, stale Codex path, absent archive images, and
+  weak hook working-directory text, then passed after each fix. The final run
+  passed 18 skill tests, 14 release tests, 10 eval tests, Promptfoo config
+  validation, formatting, strict Clippy, all 116 Rust tests, and the release
+  build. The CLI self-check reports maximum score 6 and Python span 50. A real
+  macOS arm64 archive passed its SHA-256 check and contained the README, all
+  four matching images, and the agent bundle. The final watercolor set has one
+  1600 by 900 JPEG at 692,664 bytes and three 720 by 720 JPEGs from 252,733 to
+  291,326 bytes. Independent review found no remaining actionable issue.
