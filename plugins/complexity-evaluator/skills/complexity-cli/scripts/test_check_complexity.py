@@ -26,7 +26,7 @@ import os
 import sys
 from pathlib import Path
 
-paths = [path.removeprefix("./") for path in sys.argv[5:]]
+paths = [path.removeprefix("./") for path in sys.argv[7:]]
 Path(os.environ["COMPLEXITY_CAPTURE"]).write_text(json.dumps(paths))
 score = int(os.environ.get("COMPLEXITY_SCORE", "0"))
 functions = []
@@ -61,7 +61,8 @@ print(json.dumps({
         "functions": len(functions),
         "violations": sum(function["over_limit"] for function in functions),
         "errors": 0
-    }
+    },
+    "readability": {"max_cognitive_load": 2, "violations": []}
 }))
 raise SystemExit(1 if score > 15 else 0)
 """
@@ -192,7 +193,10 @@ def function(score: int = 0, line_span: int = 3) -> dict[str, object]:
     }
 
 
-def report(functions: list[dict[str, object]]) -> dict[str, object]:
+def report(
+    functions: list[dict[str, object]],
+    readability_violations: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
     violations = sum(item["over_limit"] is True for item in functions)
     return {
         "schema_version": 2,
@@ -213,6 +217,10 @@ def report(functions: list[dict[str, object]]) -> dict[str, object]:
             "violations": violations,
             "errors": 0,
         },
+        "readability": {
+            "max_cognitive_load": 2,
+            "violations": readability_violations or [],
+        },
     }
 
 
@@ -232,6 +240,26 @@ class CheckerTests(unittest.TestCase):
         self.assertIn("example score=11>10", revise[2])
         self.assertEqual(("FAIL", 1), fail[:2])
         self.assertIn("example score=16>15", fail[2])
+
+    def test_cognitive_load_finding_requires_a_revision(self) -> None:
+        result = CHECKER.evaluate(
+            report(
+                [function()],
+                [
+                    {
+                        "rule": "cognitive_load.inline_conditional_return",
+                        "path": "src/example.ts",
+                        "function_id": "src/example.ts:1:1",
+                        "location": {"line": 2, "column": 12},
+                        "load": 3,
+                    }
+                ],
+            ),
+            1,
+        )
+
+        self.assertEqual(("REVISE", 1), result[:2])
+        self.assertIn("inline_conditional_return load=3>2", result[2])
 
     def test_policy_finding_keeps_metric_order_and_limit_level(self) -> None:
         values = {

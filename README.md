@@ -161,6 +161,7 @@ config validation.
 complexity [--language javascript|typescript|php|rust|python]...
            [--format text|json]
            [--max-complexity N]
+           [--max-cognitive-load N]
            [--stdin-filename PATH]
            <path...|->
 ```
@@ -168,6 +169,11 @@ complexity [--language javascript|typescript|php|rust|python]...
 Text is the default format. The default maximum complexity is `15`.
 `--max-complexity` marks functions above the limit and controls the result
 status; it does not hide or change scores.
+
+Use `--max-cognitive-load` to gate one dense pattern: an inline conditional
+return with a compound test and an explicit branch cast. It is separate from
+the score limit. For example, `--max-cognitive-load 2` asks the CLI to reject
+that three-part pattern and suggest a guard return instead.
 
 Scan a mixed project:
 
@@ -201,8 +207,8 @@ tool uses `stdin.js`, `stdin.ts`, `stdin.php`, `stdin.rs`, or `stdin.py`.
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Analysis finished and no function is above the limit. |
-| `1` | Analysis finished and at least one function is above the limit. |
+| `0` | Analysis finished and no enabled gate found a violation. |
+| `1` | Analysis finished and a score or cognitive-load gate found a violation. |
 | `2` | Usage or discovery failed, or at least one selected input could not be read or parsed. |
 
 Exit `2` takes priority over exit `1`. A failed file does not get false zero

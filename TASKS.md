@@ -522,12 +522,49 @@ Protocol:
   installs the local plugin as version `0.4.0` with `AVAILABLE` and
   `ON_INSTALL` policy.
 
-  Remaining: run one explicit model invocation through each installed host and
-  the short live Promptfoo eval after the owner explicitly approves sending
-  the skill text and public fixture source to those services. A 2026-08-05
-  read-only Codex attempt was rejected by the execution safety control because
-  it would send `src/main.rs` to an external service. Keep this task in progress
-  until that approval and evidence exist.
+  Live evidence on 2026-08-05: an explicit Codex invocation scored the public
+  JavaScript fixture `deliveryWindow` at 11 and returned `REVISE` with a lookup
+  table refactor. It made no edit. That first run also read local repository
+  guidance, so later checks use an isolated workspace with only the fixture and
+  required skill files. Claude Code installed the plugin but its explicit run
+  stopped before it read the fixture because its OAuth session had expired.
+  The short Promptfoo run `eval-KkI-2026-08-05T15:04:12` passed all four
+  refactor cases: JavaScript 11 to 1, TypeScript 10 to 1, PHP 2 to 1, and Rust
+  3 to 2. Temporary plugin installs, marketplaces, and workspaces were removed.
+
+  Remaining: refresh Claude Code authentication, then run one explicit Claude
+  invocation in an isolated workspace. This is an external account blocker.
+
+## CX-024: Add an optional cognitive-load gate
+
+- Status: done
+- Owner: root
+- Depends on: CX-021
+- Scope: add `--max-cognitive-load N` without changing `core-v1` scores,
+  existing output, or exit status when the option is absent. Report and gate a
+  deterministic inline conditional return that combines a conditional return,
+  a compound Boolean test, and an explicit branch cast. Add the rule for all
+  five supported languages, using each parser's native conditional-return and
+  cast syntax. Update the canonical skill, generated plugin, hook behavior,
+  docs, and focused tests.
+- Success: the TypeScript `record` regression returns score 2 and exits 0 by
+  default; with `--max-cognitive-load 2`, it returns one stable diagnostic and
+  exits 1. A guard-return refactor passes. Parse and input failures keep exit 2
+  priority. The checker asks an AI to simplify and retry.
+- Evidence: focused red tests first rejected the unknown CLI option. The final
+  Rust suite passes 46 CLI tests, 32 JavaScript tests, 22 PHP tests, 8 Python
+  tests, 6 Rust tests, 1 PHP compatibility test, and the benchmark tests.
+  Formatting, strict Clippy, and the locked release build pass. Release tests
+  pass 30 cases with one Windows-only skip. The skill checker passes 20 tests;
+  the static Promptfoo eval passes 10 tests and its config validates. Plugin
+  synchronization and drift checks pass.
+
+  The final release binary proves the requested TypeScript case: its score is
+  2, its load is 3, and `--max-cognitive-load 2` reports
+  `cognitive_load.inline_conditional_return` at line 2, column 10. The
+  guard-return refactor has score 1 and no readability violation. A Rust
+  self-check with `--max-complexity 7 --max-cognitive-load 2 src` reports
+  maximum score 6 and no cognitive-load violations.
 
 ## CX-022: Publish test release 0.3.1
 

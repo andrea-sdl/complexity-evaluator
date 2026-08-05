@@ -1,8 +1,8 @@
 use tree_sitter::{Node, Parser, Tree};
 
 use crate::model::{
-    ConditionRecord, Contribution, Diagnostic, FileResult, FileSignals, FileStatus, FunctionResult,
-    FunctionSignals, Position, SourceRange,
+    CognitiveLoadFinding, ConditionRecord, Contribution, Diagnostic, FileResult, FileSignals,
+    FileStatus, FunctionResult, FunctionSignals, Position, SourceRange,
 };
 
 const MAX_ANALYSIS_TREE_DEPTH: usize = 512;
@@ -147,8 +147,9 @@ fn function_result(
     contributions.sort_by(contribution_order);
     let score = contributions.iter().map(|item| item.increment).sum();
 
+    let id = format!("{path}:{}:{}", start.line, start.column);
     Some(FunctionResult {
-        id: format!("{path}:{}:{}", start.line, start.column),
+        id: id.clone(),
         name,
         kind: kind.to_string(),
         range: SourceRange { start, end },
@@ -156,7 +157,68 @@ fn function_result(
         over_limit: score > max_complexity,
         contributions,
         signals: function_signals(body, start, end, positions),
+        cognitive_load_findings: cognitive_load_findings(body, path, &id, positions),
     })
+}
+
+fn cognitive_load_findings(
+    body: Node<'_>,
+    path: &str,
+    function_id: &str,
+    positions: &LineIndex<'_>,
+) -> Vec<CognitiveLoadFinding> {
+    let mut findings = Vec::new();
+    collect_cognitive_load_findings(body, path, function_id, positions, &mut findings);
+    findings
+}
+
+fn collect_cognitive_load_findings(
+    node: Node<'_>,
+    path: &str,
+    function_id: &str,
+    positions: &LineIndex<'_>,
+    findings: &mut Vec<CognitiveLoadFinding>,
+) {
+    if is_analysis_boundary(node) {
+        return;
+    }
+    if node.kind() == "return_expression"
+        && let Some(expression) = node.named_child(0)
+        && expression.kind() == "if_expression"
+        && expression.child_by_field_name("alternative").is_some()
+    {
+        let has_boolean_operator = expression
+            .child_by_field_name("condition")
+            .is_some_and(|test| count_boolean_operators(test).0 > 0);
+        let branch_has_cast = ["consequence", "alternative"].into_iter().any(|field| {
+            expression
+                .child_by_field_name(field)
+                .is_some_and(branch_has_direct_cast)
+        });
+        let load = 1 + u32::from(has_boolean_operator) + u32::from(branch_has_cast);
+        findings.push(CognitiveLoadFinding {
+            rule: "cognitive_load.inline_conditional_return",
+            path: path.to_string(),
+            function_id: function_id.to_string(),
+            location: positions.position(expression.start_byte()),
+            load,
+        });
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_cognitive_load_findings(child, path, function_id, positions, findings);
+    }
+}
+
+fn branch_has_direct_cast(branch: Node<'_>) -> bool {
+    if branch.kind() == "type_cast_expression" {
+        return true;
+    }
+    let mut cursor = branch.walk();
+    branch
+        .named_children(&mut cursor)
+        .any(|child| child.kind() == "type_cast_expression")
 }
 
 fn function_name(node: Node<'_>, kind: &str, source: &str) -> String {

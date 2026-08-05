@@ -21,8 +21,8 @@ use oxc::{
 };
 
 use crate::model::{
-    ConditionRecord, Contribution, Diagnostic, FileResult, FileSignals, FileStatus, FunctionResult,
-    FunctionSignals, Position, SourceRange,
+    CognitiveLoadFinding, ConditionRecord, Contribution, Diagnostic, FileResult, FileSignals,
+    FileStatus, FunctionResult, FunctionSignals, Position, SourceRange,
 };
 
 const MAX_RISKY_OPENING_DELIMITERS: usize = 2_048;
@@ -429,6 +429,7 @@ fn score_callable(
         .sum();
     let start = context.positions.position(span.start);
     let end = context.positions.position(span.end);
+    let id = format!("{}:{}:{}", context.path, start.line, start.column);
     let mut signals = FunctionSignals::empty();
     signals.line_span = end.line - start.line + 1;
     let mut signal_collector = SignalCollector::new(context.positions);
@@ -436,8 +437,11 @@ fn score_callable(
     signal_collector.visit_function_body(body);
     signals.max_control_depth = signal_collector.max_control_depth;
     signal_collector.finish(&mut signals);
+    let mut cognitive_load_collector =
+        CognitiveLoadCollector::new(context.path, &id, context.positions);
+    cognitive_load_collector.visit_function_body(body);
     FunctionResult {
-        id: format!("{}:{}:{}", context.path, start.line, start.column),
+        id,
         name,
         kind: kind.to_string(),
         range: SourceRange { start, end },
@@ -445,6 +449,7 @@ fn score_callable(
         over_limit: score > context.max_complexity,
         contributions,
         signals,
+        cognitive_load_findings: cognitive_load_collector.finish(),
     }
 }
 
@@ -855,6 +860,67 @@ impl<'ast, 'source> Visit<'ast> for SignalCollector<'source> {
                 Item::LeaveControl => self.leave_control(),
             }
         }
+    }
+}
+
+struct CognitiveLoadCollector<'source> {
+    path: &'source str,
+    function_id: String,
+    positions: &'source SourcePositions<'source>,
+    findings: Vec<CognitiveLoadFinding>,
+}
+
+impl<'source> CognitiveLoadCollector<'source> {
+    fn new(
+        path: &'source str,
+        function_id: &str,
+        positions: &'source SourcePositions<'source>,
+    ) -> Self {
+        Self {
+            path,
+            function_id: function_id.to_string(),
+            positions,
+            findings: Vec::new(),
+        }
+    }
+
+    fn finish(self) -> Vec<CognitiveLoadFinding> {
+        self.findings
+    }
+}
+
+impl<'ast, 'source> Visit<'ast> for CognitiveLoadCollector<'source> {
+    fn visit_function(&mut self, _: &Function<'ast>, _: ScopeFlags) {}
+
+    fn visit_arrow_function_expression(&mut self, _: &ArrowFunctionExpression<'ast>) {}
+
+    fn visit_expression(&mut self, _: &Expression<'ast>) {}
+
+    fn visit_return_statement(&mut self, statement: &oxc::ast::ast::ReturnStatement<'ast>) {
+        let Some(argument) = &statement.argument else {
+            return;
+        };
+        let Expression::ConditionalExpression(expression) = unparenthesized_expression(argument)
+        else {
+            return;
+        };
+        let branch_has_cast = [&expression.consequent, &expression.alternate]
+            .into_iter()
+            .any(|branch| {
+                matches!(
+                    unparenthesized_expression(branch),
+                    Expression::TSAsExpression(_) | Expression::TSTypeAssertion(_)
+                )
+            });
+        let has_boolean_operator = boolean_shape(&expression.test).operator_count > 0;
+        let load = 1 + u32::from(has_boolean_operator) + u32::from(branch_has_cast);
+        self.findings.push(CognitiveLoadFinding {
+            rule: "cognitive_load.inline_conditional_return",
+            path: self.path.to_string(),
+            function_id: self.function_id.clone(),
+            location: self.positions.position(expression.span.start),
+            load,
+        });
     }
 }
 
