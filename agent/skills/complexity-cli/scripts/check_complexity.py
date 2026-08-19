@@ -601,39 +601,48 @@ def validate_summary_counts(
         raise RuntimeError("summary.violations does not match the function records")
 
 
+def readability_string(value: Any) -> str:
+    if not isinstance(value, str):
+        raise RuntimeError("complexity schema v2 has an invalid cognitive-load finding")
+    return value
+
+
+def readability_location(value: Any) -> tuple[int, int]:
+    if not isinstance(value, dict):
+        raise RuntimeError("complexity schema v2 has an invalid cognitive-load finding")
+    line = required_int(value.get("line"), "readability.violations.location.line")
+    column = required_int(
+        value.get("column"), "readability.violations.location.column"
+    )
+    if line == 0 or column == 0:
+        raise RuntimeError("complexity schema v2 has an invalid cognitive-load finding")
+    return line, column
+
+
+def readability_finding(violation: Any) -> tuple[str, str]:
+    if not isinstance(violation, dict):
+        raise RuntimeError("complexity schema v2 has an invalid cognitive-load finding")
+    rule = violation.get("rule")
+    if rule != "cognitive_load.inline_conditional_return":
+        raise RuntimeError("complexity schema v2 has an invalid cognitive-load finding")
+    readability_string(violation.get("path"))
+    function_id = readability_string(violation.get("function_id"))
+    readability_location(violation.get("location"))
+    load = required_int(violation.get("load"), "readability.violations.load")
+    if load <= MAX_COGNITIVE_LOAD:
+        raise RuntimeError("complexity schema v2 has an invalid cognitive-load finding")
+    return (
+        "REVISE",
+        f"{function_id} {rule} load={load}>{MAX_COGNITIVE_LOAD}",
+    )
+
+
 def readability_findings(report: dict[str, Any]) -> list[tuple[str, str]]:
     readability = report["readability"]
     violations = readability.get("violations")
     if not isinstance(violations, list):
         raise RuntimeError("complexity schema v2 has invalid cognitive-load findings")
-
-    findings: list[tuple[str, str]] = []
-    for violation in violations:
-        if not isinstance(violation, dict):
-            raise RuntimeError("complexity schema v2 has an invalid cognitive-load finding")
-        rule = violation.get("rule")
-        path = violation.get("path")
-        function_id = violation.get("function_id")
-        load = violation.get("load")
-        location = violation.get("location")
-        line = location.get("line") if isinstance(location, dict) else None
-        column = location.get("column") if isinstance(location, dict) else None
-        if (
-            rule != "cognitive_load.inline_conditional_return"
-            or not isinstance(path, str)
-            or not isinstance(function_id, str)
-            or required_int(line, "readability.violations.location.line") == 0
-            or required_int(column, "readability.violations.location.column") == 0
-            or required_int(load, "readability.violations.load") <= MAX_COGNITIVE_LOAD
-        ):
-            raise RuntimeError("complexity schema v2 has an invalid cognitive-load finding")
-        findings.append(
-            (
-                "REVISE",
-                f"{function_id} {rule} load={load}>{MAX_COGNITIVE_LOAD}",
-            )
-        )
-    return findings
+    return [readability_finding(violation) for violation in violations]
 
 
 def validate_cli_exit(
