@@ -641,7 +641,7 @@ Protocol:
 
 ## CX-025: Publish release 0.4.0
 
-- Status: in-progress
+- Status: done
 - Owner: root
 - Depends on: CX-024
 - Scope: validate the current `0.4.0` source, publish a signed release
@@ -659,3 +659,9 @@ Protocol:
   pass. A real macOS arm64 archive reports `complexity 0.4.0`, passes its
   SHA-256 check, and contains the binary, docs, manual agent bundle, plugin,
   and both marketplace files.
+- Release evidence: signed commit `7f6e7b8` and signed annotated tag
+  `complexity-v0.4.0` are on GitHub. Actions run `32274456355` passed the full
+  validation job, all five native package jobs, both Windows hook samples, and
+  the final checksum gate. GitHub published a non-draft, non-prerelease release
+  with five archives and five matching SHA-256 files. The workflow and tag
+  both use commit `7f6e7b806b879f72dbc360d888050ff28a2c7453`.
