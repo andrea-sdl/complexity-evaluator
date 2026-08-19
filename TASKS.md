@@ -638,3 +638,24 @@ Protocol:
   four matching images, and the agent bundle. The final watercolor set has one
   1600 by 900 JPEG at 692,664 bytes and three 720 by 720 JPEGs from 252,733 to
   291,326 bytes. Independent review found no remaining actionable issue.
+
+## CX-025: Publish release 0.4.0
+
+- Status: in-progress
+- Owner: root
+- Depends on: CX-024
+- Scope: validate the current `0.4.0` source, publish a signed release
+  preparation commit, and push one signed annotated `complexity-v0.4.0` tag.
+  Do not change scores, schemas, dependencies, or release contents.
+- Success: all documented release checks pass; the signed commit and tag reach
+  `main`; the tag-triggered workflow publishes all five archives and checksum
+  files; and the GitHub release points to the unchanged signed tag.
+- Preparation evidence: the first release test run found that
+  `readability_findings` exceeded the project score limit. A small split kept
+  the same schema checks and output while lowering each function to the limit.
+  The tag validator, plugin drift check, formatting, strict Clippy, all 118
+  Rust tests, the locked release build, 31 release tests with one Windows-only
+  skip, 20 skill tests, 10 static eval tests, and Promptfoo config validation
+  pass. A real macOS arm64 archive reports `complexity 0.4.0`, passes its
+  SHA-256 check, and contains the binary, docs, manual agent bundle, plugin,
+  and both marketplace files.
